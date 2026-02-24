@@ -1,0 +1,22 @@
+---
+description: Reglas para ejecutar SQL en Supabase usando el MCP disponible
+alwaysApply: true
+---
+
+# Supabase SQL Execution
+
+Cuando necesites ejecutar SQL en Supabase (migraciones, correcciones RLS, alteraciones de schema, seeds, etc.):
+
+1. **Usa el MCP de Supabase** (servidor: `plugin-supabase-supabase`, herramienta: `execute_sql`).
+   - Ejemplo: `CallMcpTool(server="plugin-supabase-supabase", toolName="execute_sql", arguments={project_id: "eqwoxwxzymgtsfybwpjc", query: "SELECT 1"})`
+   - Para listar tablas: `list_tables`
+   - Para aplicar migraciones: `apply_migration`
+   - Para generar tipos TypeScript: `generate_typescript_types`
+
+2. **Siempre verifica el resultado** de la ejecución del SQL antes de continuar.
+
+3. **Para consultas largas**, divídelas en bloques lógicos y ejecútalas secuencialmente.
+
+## Proyecto Supabase
+- **Project ID**: `eqwoxwxzymgtsfybwpjc`
+- **MCP Server Name**: `plugin-supabase-supabase`
