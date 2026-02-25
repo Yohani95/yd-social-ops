@@ -34,7 +34,8 @@ export async function GET(request: NextRequest) {
  * Unified webhook for WhatsApp and Messenger.
  * Meta sends both through the same endpoint, differentiated by:
  * - WhatsApp: entry[].changes[].value.messaging_product === "whatsapp"
- * - Messenger: entry[].messaging[].sender.id (Page Messaging)
+ * - Messenger: object "page", entry[].messaging[]
+ * - Instagram: object "instagram", entry[].messaging[]
  */
 export async function POST(request: NextRequest) {
   try {
@@ -45,6 +46,8 @@ export async function POST(request: NextRequest) {
       await handleWhatsApp(body);
     } else if (objectType === "page") {
       await handleMessenger(body);
+    } else if (objectType === "instagram") {
+      await handleInstagram(body);
     } else {
       console.warn("[Meta Webhook] Unknown object type:", objectType);
     }
@@ -88,6 +91,23 @@ async function handleMessenger(body: unknown) {
   }
 
   await processAndReply(channel, "messenger", parsed.senderId, parsed.message);
+}
+
+async function handleInstagram(body: unknown) {
+  const adapter = getAdapter("instagram");
+  const parsed = adapter.parseIncoming(body);
+  if (!parsed) return;
+
+  const igAccountId = parsed.metadata?.ig_account_id as string;
+  if (!igAccountId) return;
+
+  const channel = await findChannelByProviderConfig("instagram", "ig_account_id", igAccountId);
+  if (!channel) {
+    console.warn("[Meta Webhook] No channel found for ig_account_id:", igAccountId);
+    return;
+  }
+
+  await processAndReply(channel, "instagram", parsed.senderId, parsed.message);
 }
 
 async function findChannelByProviderConfig(

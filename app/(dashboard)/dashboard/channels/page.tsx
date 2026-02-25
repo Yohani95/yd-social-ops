@@ -16,6 +16,7 @@ import {
   ExternalLink,
   Globe,
   ArrowRight,
+  RefreshCw,
 } from "lucide-react";
 import {
   Card,
@@ -43,6 +44,7 @@ import {
   createChannel,
   toggleChannel,
   deleteChannel,
+  syncWhatsAppChannel,
 } from "@/actions/channels";
 import type { SocialChannel, ChatChannel } from "@/types";
 
@@ -137,7 +139,8 @@ export default function ChannelsPage() {
 
   useEffect(() => {
     if (searchParams.get("meta_success")) {
-      toast.success("Canal de Meta conectado exitosamente");
+      getChannels().then(setChannels).catch(() => {});
+      toast.success("Canal de Meta conectado. Si no ves el número, usa «Sincronizar número».");
     }
     if (searchParams.get("meta_error")) {
       toast.error(`Error al conectar Meta: ${searchParams.get("meta_error")}`);
@@ -176,18 +179,22 @@ export default function ChannelsPage() {
     toast.success(`${label} copiado`);
   }
 
-  function handleConnectMeta(channelType: "whatsapp" | "messenger") {
+  function handleConnectMeta(channelType: "whatsapp" | "messenger" | "instagram") {
     const metaAppId = process.env.NEXT_PUBLIC_META_APP_ID;
     if (!metaAppId) {
       toast.error("META_APP_ID no configurado. Agrega NEXT_PUBLIC_META_APP_ID en .env.local");
       return;
     }
     const appUrl = window.location.origin;
-    const state = Buffer.from(JSON.stringify({ tenant_id: tenantId, channel_type: channelType })).toString("base64url");
+    const stateJson = JSON.stringify({ tenant_id: tenantId, channel_type: channelType });
+    const state = btoa(stateJson).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     const redirectUri = `${appUrl}/api/auth/meta/callback`;
-    const scopes = channelType === "whatsapp"
-      ? "whatsapp_business_messaging,whatsapp_business_management"
-      : "pages_messaging,pages_show_list";
+    const scopes =
+      channelType === "whatsapp"
+        ? "whatsapp_business_messaging,whatsapp_business_management"
+        : channelType === "instagram"
+          ? "instagram_basic,instagram_manage_messages,pages_show_list"
+          : "pages_messaging,pages_show_list";
 
     const params = new URLSearchParams({
       client_id: metaAppId,
@@ -219,18 +226,18 @@ export default function ChannelsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Share2 className="w-6 h-6" />
-            Canales
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold flex items-center gap-2 sm:text-2xl">
+            <Share2 className="w-5 h-5 shrink-0 sm:w-6 sm:h-6" />
+            <span className="truncate">Canales</span>
           </h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-muted-foreground mt-1 text-sm sm:text-base">
             Conecta canales para que tu bot atienda en múltiples plataformas
           </p>
         </div>
         {availableTypes.length > 0 && (
-          <Button onClick={() => setShowAdd(true)}>
+          <Button onClick={() => setShowAdd(true)} className="w-full sm:w-auto shrink-0">
             <Plus className="w-4 h-4" />
             Agregar canal
           </Button>
@@ -239,13 +246,13 @@ export default function ChannelsPage() {
 
       {/* Plan limits */}
       <Card className="bg-muted/30">
-        <CardContent className="py-3 flex items-center justify-between text-sm">
-          <span>
+        <CardContent className="py-3 flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm">
+          <span className="break-words">
             Plan <Badge variant="secondary" className="capitalize mx-1">{plan}</Badge>
-            — Web {limits.web ? "✓" : "✗"} · Canales externos: {externalChannels.length}/{limits.external === 99 ? "∞" : limits.external}
+            — Web {limits.web ? "✓" : "✗"} · Canales: {externalChannels.length}/{limits.external === 99 ? "∞" : limits.external}
           </span>
           {plan !== "enterprise" && (
-            <Badge variant="outline" className="cursor-pointer" onClick={() => window.location.href = "/pricing"}>
+            <Badge variant="outline" className="cursor-pointer shrink-0" onClick={() => window.location.href = "/pricing"}>
               Upgrade
             </Badge>
           )}
@@ -281,34 +288,36 @@ export default function ChannelsPage() {
             };
             const isExpanded = expandedChannel === ch.id;
             const chType = ch.channel_type as string;
-            const webhookUrl = chType === "whatsapp" || chType === "messenger"
-              ? `${appUrl}/api/webhooks/meta`
-              : chType === "tiktok"
-                ? `${appUrl}/api/webhooks/tiktok`
-                : ch.webhook_url;
+            const webhookUrl =
+              chType === "whatsapp" || chType === "messenger" || chType === "instagram"
+                ? `${appUrl}/api/webhooks/meta`
+                : chType === "tiktok"
+                  ? `${appUrl}/api/webhooks/tiktok`
+                  : ch.webhook_url;
 
             return (
               <Card key={ch.id} className={!ch.is_active ? "opacity-60" : ""}>
                 <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-lg ${info.color} flex items-center justify-center text-lg`}>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`w-10 h-10 shrink-0 rounded-lg ${info.color} flex items-center justify-center text-lg`}>
                         {info.icon}
                       </div>
-                      <div>
-                        <CardTitle className="text-base">{info.label}</CardTitle>
+                      <div className="min-w-0">
+                        <CardTitle className="text-base truncate">{info.label}</CardTitle>
                         {ch.display_name && ch.display_name !== info.label && (
-                          <p className="text-xs text-muted-foreground">{ch.display_name}</p>
+                          <p className="text-xs text-muted-foreground truncate">{ch.display_name}</p>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <Badge variant={ch.is_active ? "success" : "secondary"}>
                         {ch.is_active ? "Activo" : "Inactivo"}
                       </Badge>
                       <Button
                         variant="ghost"
                         size="sm"
+                        className="h-8"
                         onClick={() => setExpandedChannel(isExpanded ? null : ch.id)}
                       >
                         {isExpanded ? "Cerrar" : "Detalles"}
@@ -357,28 +366,60 @@ export default function ChannelsPage() {
                     <Separator />
 
                     {/* Connection actions */}
-                    {(ch.channel_type === "whatsapp" || ch.channel_type === "messenger") && !ch.access_token && (
-                      <div className="space-y-2">
-                        <Button
-                          onClick={() => handleConnectMeta(ch.channel_type as "whatsapp" | "messenger")}
-                          className={ch.channel_type === "whatsapp" ? "bg-green-600 hover:bg-green-700" : "bg-blue-600 hover:bg-blue-700"}
-                        >
-                          <Globe className="w-4 h-4 mr-2" />
-                          Conectar con Meta
-                          <ArrowRight className="w-4 h-4 ml-2" />
-                        </Button>
-                        <p className="text-xs text-muted-foreground">
-                          Se abrirá Facebook para que autorices la conexión. Requiere META_APP_ID configurado.
+                    {(ch.channel_type === "whatsapp" || ch.channel_type === "messenger" || ch.channel_type === "instagram") && (
+                      <div className="space-y-2 min-w-0">
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            onClick={() => handleConnectMeta(ch.channel_type as "whatsapp" | "messenger" | "instagram")}
+                            className={
+                              ch.channel_type === "whatsapp"
+                                ? "w-full sm:w-auto bg-green-600 hover:bg-green-700"
+                                : ch.channel_type === "instagram"
+                                  ? "w-full sm:w-auto bg-pink-600 hover:bg-pink-700"
+                                  : "w-full sm:w-auto bg-blue-600 hover:bg-blue-700"
+                            }
+                          >
+                            <Globe className="w-4 h-4 mr-2 shrink-0" />
+                            {ch.access_token ? "Reconectar con Meta" : "Conectar con Meta"}
+                            <ArrowRight className="w-4 h-4 ml-2 shrink-0" />
+                          </Button>
+                          {ch.channel_type === "whatsapp" && ch.access_token && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={isPending}
+                              onClick={() => {
+                                startTransition(async () => {
+                                  const result = await syncWhatsAppChannel(ch.id);
+                                  if (result.success) {
+                                    getChannels().then(setChannels);
+                                    const hasId = result.data?.phone_number_id;
+                                    toast.success(hasId ? "Número sincronizado correctamente" : "Sincronizado. Si sigue en null, reconecta con Meta.");
+                                  } else {
+                                    toast.error(result.error || "Error al sincronizar");
+                                  }
+                                });
+                              }}
+                            >
+                              {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5 mr-1" />}
+                              Sincronizar número
+                            </Button>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground break-words">
+                          {ch.access_token
+                            ? "Si Facebook te devolvió sin pedir elegir número, usa «Sincronizar número» para obtener el ID desde el token."
+                            : "Se abrirá Facebook para que autorices la conexión. Requiere META_APP_ID configurado."}
                         </p>
                       </div>
                     )}
 
                     {/* Webhook URL */}
                     {webhookUrl && ch.channel_type !== "web" && (
-                      <div className="space-y-1.5">
+                      <div className="space-y-1.5 min-w-0">
                         <p className="text-xs font-medium text-muted-foreground">Webhook URL</p>
-                        <div className="flex items-center gap-2">
-                          <code className="text-xs bg-muted px-3 py-1.5 rounded flex-1 truncate font-mono">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <code className="text-xs bg-muted px-3 py-1.5 rounded flex-1 min-w-0 truncate font-mono block">
                             {webhookUrl}
                           </code>
                           <Button
@@ -403,12 +444,12 @@ export default function ChannelsPage() {
 
                     {/* Provider config info */}
                     {ch.provider_config && Object.keys(ch.provider_config).length > 0 && (
-                      <div className="space-y-1">
+                      <div className="space-y-1 min-w-0 overflow-hidden">
                         <p className="text-xs font-medium text-muted-foreground">Configuración del proveedor</p>
-                        <div className="bg-muted rounded-md p-2 text-xs font-mono space-y-0.5">
+                        <div className="bg-muted rounded-md p-2 text-xs font-mono space-y-0.5 overflow-x-auto">
                           {Object.entries(ch.provider_config).map(([key, val]) => (
-                            <div key={key} className="flex gap-2">
-                              <span className="text-muted-foreground">{key}:</span>
+                            <div key={key} className="flex gap-2 min-w-0">
+                              <span className="text-muted-foreground shrink-0">{key}:</span>
                               <span className="truncate">{typeof val === "string" ? val.substring(0, 30) + (String(val).length > 30 ? "..." : "") : String(val)}</span>
                             </div>
                           ))}
@@ -419,11 +460,11 @@ export default function ChannelsPage() {
                     <Separator />
 
                     {/* Actions */}
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <Button
                         variant="outline"
                         size="sm"
-                        className="flex-1"
+                        className="flex-1 w-full sm:w-auto"
                         onClick={() => handleToggle(ch)}
                         disabled={isPending}
                       >
@@ -436,9 +477,9 @@ export default function ChannelsPage() {
                       <Button
                         variant="outline"
                         size="sm"
+                        className="w-full sm:w-auto text-destructive hover:text-destructive"
                         onClick={() => handleDelete(ch)}
                         disabled={isPending}
-                        className="text-destructive hover:text-destructive"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </Button>
@@ -509,16 +550,16 @@ function AddChannelDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="w-[calc(100%-2rem)] max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Agregar canal</DialogTitle>
-          <DialogDescription>
+          <DialogTitle className="text-left">Agregar canal</DialogTitle>
+          <DialogDescription className="text-left">
             Selecciona el canal que quieres conectar
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-2">
+        <form onSubmit={handleSubmit} className="space-y-4 min-w-0">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {availableTypes.map((type) => {
               const info = CHANNEL_INFO[type];
               if (!info) return null;
@@ -526,7 +567,7 @@ function AddChannelDialog({
                 <button
                   key={type}
                   type="button"
-                  className={`p-3 rounded-lg border text-left transition-colors ${
+                  className={`p-3 rounded-lg border text-left transition-colors min-w-0 ${
                     selectedType === type
                       ? "border-primary bg-primary/5"
                       : "border-border hover:border-primary/50"
@@ -546,31 +587,39 @@ function AddChannelDialog({
           {selectedType && (
             <>
               {/* Steps preview */}
-              <div className="bg-muted/50 rounded-lg p-3 space-y-2">
+              <div className="bg-muted/50 rounded-lg p-3 space-y-2 min-w-0">
                 <p className="text-xs font-medium text-muted-foreground">Pasos de configuración:</p>
                 {CHANNEL_INFO[selectedType]?.steps.map((step, i) => (
                   <div key={i} className="flex items-start gap-2 text-xs">
                     <span className="w-4 h-4 rounded-full border border-muted-foreground/30 flex items-center justify-center shrink-0 mt-0.5 text-[10px]">
                       {i + 1}
                     </span>
-                    <span>{step.title}</span>
+                    <span className="break-words">{step.title}</span>
                   </div>
                 ))}
               </div>
 
-              <div className="space-y-2">
-                <Label>Nombre personalizado</Label>
+              <div className="space-y-1.5 min-w-0">
+                <Label>
+                  Nombre personalizado <span className="text-muted-foreground font-normal">(opcional)</span>
+                </Label>
                 <Input
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   placeholder={CHANNEL_INFO[selectedType]?.label}
+                  className="w-full"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Ej: Mi WhatsApp tienda. Si lo dejas vacío se usará el nombre del canal.
+                </p>
               </div>
 
               {selectedType !== "web" && (
                 <>
-                  <div className="space-y-2">
-                    <Label>Identificador del canal</Label>
+                  <div className="space-y-1.5 min-w-0">
+                    <Label>
+                      Identificador del canal <span className="text-muted-foreground font-normal">(opcional)</span>
+                    </Label>
                     <Input
                       value={identifier}
                       onChange={(e) => setIdentifier(e.target.value)}
@@ -583,27 +632,37 @@ function AddChannelDialog({
                               ? "@mi_cuenta"
                               : "ID del canal"
                       }
+                      className="w-full"
                     />
+                    <p className="text-xs text-muted-foreground">
+                      Para WhatsApp y Messenger no hace falta: se completará al hacer &quot;Conectar con Meta&quot;.
+                    </p>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label>Webhook Secret (opcional)</Label>
+                  <div className="space-y-1.5 min-w-0">
+                    <Label>
+                      Webhook Secret <span className="text-muted-foreground font-normal">(opcional)</span>
+                    </Label>
                     <Input
                       value={webhookSecret}
                       onChange={(e) => setWebhookSecret(e.target.value)}
-                      placeholder="clave-secreta-para-validar"
+                      placeholder="Solo si tu integración lo pide"
+                      className="w-full"
                     />
+                    <p className="text-xs text-muted-foreground">
+                      Solo para algunos canales (ej. TikTok). La mayoría puede dejarlo vacío.
+                    </p>
                   </div>
                 </>
               )}
             </>
           )}
 
-          <div className="flex gap-3 justify-end">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">
               Cancelar
             </Button>
-            <Button type="submit" disabled={!selectedType || isPending}>
+            <Button type="submit" disabled={!selectedType || isPending} className="w-full sm:w-auto">
               {isPending && <Loader2 className="w-4 h-4 animate-spin mr-1" />}
               Agregar canal
             </Button>

@@ -1,6 +1,7 @@
 import type { SocialChannel, ChatChannel } from "@/types";
 import { WhatsAppAdapter } from "./whatsapp";
 import { MessengerAdapter } from "./messenger";
+import { InstagramAdapter } from "./instagram";
 import { TikTokAdapter } from "./tiktok";
 import { GenericAdapter } from "./generic";
 
@@ -19,6 +20,7 @@ export interface ChannelAdapter {
 const adapters: Record<string, ChannelAdapter> = {
   whatsapp: new WhatsAppAdapter(),
   messenger: new MessengerAdapter(),
+  instagram: new InstagramAdapter(),
   tiktok: new TikTokAdapter(),
   web: new GenericAdapter(),
 };

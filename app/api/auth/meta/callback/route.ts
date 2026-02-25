@@ -61,13 +61,33 @@ export async function GET(request: NextRequest) {
         { headers: { Authorization: `Bearer ${metaAppId}|${metaAppSecret}` } }
       );
       const wabaData = await wabaRes.json();
-      providerConfig = {
-        phone_number_id: wabaData?.data?.granular_scopes?.find(
+      let phoneNumberId: string | null =
+        wabaData?.data?.granular_scopes?.find(
           (s: { scope: string }) => s.scope === "whatsapp_business_messaging"
-        )?.target_ids?.[0] || null,
-        waba_id: wabaData?.data?.granular_scopes?.find(
+        )?.target_ids?.[0] ?? null;
+      let wabaId: string | null =
+        wabaData?.data?.granular_scopes?.find(
           (s: { scope: string }) => s.scope === "whatsapp_business_management"
-        )?.target_ids?.[0] || null,
+        )?.target_ids?.[0] ?? wabaData?.data?.profile_id ?? null;
+
+      // Fallback: si debug_token no devuelve target_ids, obtener WABA y números por API
+      if ((!phoneNumberId || !wabaId) && wabaData?.data?.profile_id) {
+        wabaId = wabaId ?? wabaData.data.profile_id;
+      }
+      if (wabaId && !phoneNumberId) {
+        const phonesRes = await fetch(
+          `https://graph.facebook.com/v21.0/${wabaId}/phone_numbers?access_token=${encodeURIComponent(accessToken)}`
+        );
+        const phonesData = await phonesRes.json();
+        const firstPhone = phonesData?.data?.[0];
+        if (firstPhone?.id) {
+          phoneNumberId = firstPhone.id;
+        }
+      }
+
+      providerConfig = {
+        phone_number_id: phoneNumberId,
+        waba_id: wabaId,
       };
     } else if (channel_type === "messenger") {
       const pagesRes = await fetch(
@@ -80,6 +100,23 @@ export async function GET(request: NextRequest) {
           page_id: page.id,
           page_name: page.name,
           page_access_token: page.access_token,
+        };
+      }
+    } else if (channel_type === "instagram") {
+      const pagesRes = await fetch(
+        `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token,instagram_business_account&access_token=${encodeURIComponent(accessToken)}`
+      );
+      const pagesData = await pagesRes.json();
+      const page = (pagesData?.data as Array<{ id: string; name: string; access_token?: string; instagram_business_account?: { id: string } }>)?.find(
+        (p) => p.instagram_business_account?.id
+      ) || pagesData?.data?.[0];
+      if (page) {
+        const igAccount = page.instagram_business_account;
+        providerConfig = {
+          page_id: page.id,
+          page_name: page.name,
+          page_access_token: page.access_token,
+          ig_account_id: igAccount?.id || page.id,
         };
       }
     }
@@ -97,7 +134,7 @@ export async function GET(request: NextRequest) {
       await supabase
         .from("social_channels")
         .update({
-          access_token: channel_type === "messenger"
+          access_token: channel_type === "messenger" || channel_type === "instagram"
             ? (providerConfig.page_access_token as string) || accessToken
             : accessToken,
           provider_config: providerConfig,
@@ -108,11 +145,17 @@ export async function GET(request: NextRequest) {
         .eq("id", existing.id);
     } else {
       const webhookUrl = `${appUrl}/api/webhooks/meta`;
+      const displayName =
+        channel_type === "whatsapp"
+          ? "WhatsApp Business"
+          : channel_type === "instagram"
+            ? `Instagram${providerConfig.page_name ? ` - ${providerConfig.page_name}` : ""}`
+            : `Messenger${providerConfig.page_name ? ` - ${providerConfig.page_name}` : ""}`;
       await supabase.from("social_channels").insert({
         tenant_id,
         channel_type,
-        display_name: channel_type === "whatsapp" ? "WhatsApp Business" : `Messenger${providerConfig.page_name ? ` - ${providerConfig.page_name}` : ""}`,
-        access_token: channel_type === "messenger"
+        display_name: displayName,
+        access_token: channel_type === "messenger" || channel_type === "instagram"
           ? (providerConfig.page_access_token as string) || accessToken
           : accessToken,
         webhook_url: webhookUrl,

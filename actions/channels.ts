@@ -123,3 +123,74 @@ export async function deleteChannel(channelId: string): Promise<ActionResult> {
   revalidatePath("/dashboard/channels");
   return { success: true };
 }
+
+/**
+ * Obtiene phone_number_id y waba_id desde el token guardado (sin pasar por OAuth).
+ * Útil cuando Reconectar con Meta no llega a mostrar pantalla de selección y los IDs quedan null.
+ */
+export async function syncWhatsAppChannel(channelId: string): Promise<ActionResult<{ phone_number_id: string | null; waba_id: string | null }>> {
+  const ctx = await getAuthenticatedContext();
+  if (!ctx) return { success: false, error: "No autenticado" };
+
+  const { data: channel, error: fetchError } = await ctx.supabase
+    .from("social_channels")
+    .select("id, channel_type, access_token, provider_config")
+    .eq("id", channelId)
+    .eq("tenant_id", ctx.tenantId)
+    .single();
+
+  if (fetchError || !channel) return { success: false, error: "Canal no encontrado" };
+  if (channel.channel_type !== "whatsapp") return { success: false, error: "Solo aplica a canales WhatsApp" };
+  if (!channel.access_token) return { success: false, error: "El canal no tiene token. Usa Reconectar con Meta." };
+
+  const metaAppId = process.env.META_APP_ID;
+  const metaAppSecret = process.env.META_APP_SECRET;
+  if (!metaAppId || !metaAppSecret) return { success: false, error: "META_APP_ID o META_APP_SECRET no configurados" };
+
+  const accessToken = channel.access_token as string;
+
+  const wabaRes = await fetch(
+    `https://graph.facebook.com/v21.0/debug_token?input_token=${encodeURIComponent(accessToken)}`,
+    { headers: { Authorization: `Bearer ${metaAppId}|${metaAppSecret}` } }
+  );
+  const wabaData = await wabaRes.json();
+
+  let phoneNumberId: string | null =
+    wabaData?.data?.granular_scopes?.find(
+      (s: { scope: string }) => s.scope === "whatsapp_business_messaging"
+    )?.target_ids?.[0] ?? null;
+  let wabaId: string | null =
+    wabaData?.data?.granular_scopes?.find(
+      (s: { scope: string }) => s.scope === "whatsapp_business_management"
+    )?.target_ids?.[0] ?? wabaData?.data?.profile_id ?? null;
+
+  if (wabaData?.data?.profile_id) wabaId = wabaId ?? wabaData.data.profile_id;
+  if (wabaId && !phoneNumberId) {
+    const phonesRes = await fetch(
+      `https://graph.facebook.com/v21.0/${wabaId}/phone_numbers?access_token=${encodeURIComponent(accessToken)}`
+    );
+    const phonesData = await phonesRes.json();
+    const firstPhone = phonesData?.data?.[0];
+    if (firstPhone?.id) phoneNumberId = firstPhone.id;
+  }
+
+  const providerConfig = {
+    ...((channel.provider_config as Record<string, unknown>) || {}),
+    phone_number_id: phoneNumberId,
+    waba_id: wabaId,
+  };
+
+  const { error: updateError } = await ctx.supabase
+    .from("social_channels")
+    .update({
+      provider_config: providerConfig,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", channelId)
+    .eq("tenant_id", ctx.tenantId);
+
+  if (updateError) return { success: false, error: updateError.message };
+
+  revalidatePath("/dashboard/channels");
+  return { success: true, data: { phone_number_id: phoneNumberId, waba_id: wabaId } };
+}

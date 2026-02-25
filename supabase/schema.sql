@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS social_channels (
   id                 UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   tenant_id          UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   channel_type       TEXT NOT NULL
-                     CHECK (channel_type IN ('whatsapp', 'instagram', 'tiktok', 'web')),
+                     CHECK (channel_type IN ('whatsapp', 'messenger', 'instagram', 'tiktok', 'web')),
   channel_identifier TEXT,              -- Número de WA, username de IG, etc.
   display_name       TEXT,
   access_token       TEXT,              -- Cifrado
