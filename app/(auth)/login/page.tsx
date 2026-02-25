@@ -42,7 +42,7 @@ function LoginForm() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted/50 p-4">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-md min-w-0">
         {/* Logo */}
         <div className="flex items-center justify-center gap-2 mb-8">
 

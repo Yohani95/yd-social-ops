@@ -110,7 +110,7 @@ export default function PricingPage() {
     <div className="min-h-screen bg-background">
       {/* Navbar */}
       <nav className="border-b sticky top-0 bg-background/80 backdrop-blur-sm z-10">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
               <Bot className="w-5 h-5 text-primary-foreground" />
@@ -135,10 +135,10 @@ export default function PricingPage() {
         <Badge variant="secondary" className="mb-4">
           14 días de prueba gratis en todos los planes
         </Badge>
-        <h1 className="text-4xl sm:text-5xl font-bold mb-4">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-4">
           Precios simples y transparentes
         </h1>
-        <p className="text-xl text-muted-foreground max-w-xl mx-auto">
+        <p className="text-base sm:text-xl text-muted-foreground max-w-xl mx-auto">
           Elige el plan que mejor se adapte a tu negocio. Sin contratos.
           Cancela cuando quieras.
         </p>

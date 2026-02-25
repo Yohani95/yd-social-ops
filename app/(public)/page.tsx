@@ -78,7 +78,7 @@ export default function LandingPage() {
     <div className="min-h-screen bg-background">
       {/* Navbar */}
       <nav className="border-b sticky top-0 bg-background/80 backdrop-blur-sm z-10">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
               <Bot className="w-5 h-5 text-primary-foreground" />
@@ -112,12 +112,12 @@ export default function LandingPage() {
           <Zap className="w-3 h-3 mr-1" />
           Automatiza tus ventas hoy mismo
         </Badge>
-        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight mb-6">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight mb-6">
           Tu bot de ventas
           <br />
           <span className="text-primary">inteligente en redes sociales</span>
         </h1>
-        <p className="text-xl text-muted-foreground max-w-2xl mx-auto mb-8">
+        <p className="text-base sm:text-xl text-muted-foreground max-w-2xl mx-auto mb-8">
           Responde clientes, genera links de pago de Mercado Pago y descuenta
           stock automáticamente — mientras tú descansas.
         </p>

@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { LogOut, ChevronDown, User, Copy, CheckCheck } from "lucide-react";
+import { LogOut, ChevronDown, User, Copy, CheckCheck, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { useSidebar } from "@/components/dashboard/sidebar-context";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import type { Tenant } from "@/types";
 
@@ -16,6 +17,7 @@ interface HeaderProps {
 
 export function DashboardHeader({ user, tenant }: HeaderProps) {
   const router = useRouter();
+  const { setOpen } = useSidebar();
   const [loggingOut, setLoggingOut] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -37,12 +39,24 @@ export function DashboardHeader({ user, tenant }: HeaderProps) {
   }
 
   return (
-    <header className="h-14 border-b bg-background flex items-center justify-between px-6 shrink-0">
+    <header className="h-14 border-b bg-background flex items-center justify-between gap-2 px-4 sm:px-6 shrink-0">
+      {/* Menú móvil */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="lg:hidden min-w-[44px] min-h-[44px]"
+        onClick={() => setOpen(true)}
+        title="Abrir menú"
+        aria-label="Abrir menú de navegación"
+      >
+        <Menu className="w-5 h-5" />
+      </Button>
+
       {/* Bot URL */}
       {tenant && (
         <button
           onClick={copyBotUrl}
-          className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors group"
+          className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors group min-h-[44px] min-w-[44px] lg:min-w-0 lg:min-h-0 justify-center lg:justify-start"
           title="Copiar URL del bot"
         >
           <span className="hidden sm:block font-mono bg-muted px-2 py-1 rounded truncate max-w-xs">

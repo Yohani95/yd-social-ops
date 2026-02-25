@@ -125,10 +125,10 @@ export default function SimulatorPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Zap className="w-6 h-6" />
-          Simulador de Bot
+      <div className="min-w-0">
+        <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
+          <Zap className="w-5 h-5 sm:w-6 sm:h-6 shrink-0" />
+          <span className="truncate">Simulador de Bot</span>
         </h1>
         <p className="text-muted-foreground mt-1">
           Prueba tu bot como si fueras un cliente en cualquier canal
@@ -177,7 +177,7 @@ export default function SimulatorPage() {
             </div>
 
             {/* Messages */}
-            <div className={`h-[450px] overflow-y-auto p-4 space-y-3 ${channel !== "web" ? style.bg : ""}`}>
+            <div className={`h-[min(450px,70vh)] min-h-[280px] overflow-y-auto p-4 space-y-3 ${channel !== "web" ? style.bg : ""}`}>
               {messages.map((msg) => (
                 <div
                   key={msg.id}

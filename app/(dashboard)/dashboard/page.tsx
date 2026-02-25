@@ -82,8 +82,8 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">
+      <div className="min-w-0">
+        <h1 className="text-xl sm:text-2xl font-bold truncate">
           Hola, {tenant?.name || "Vendedor"} 👋
         </h1>
         <p className="text-muted-foreground mt-1">
@@ -93,10 +93,12 @@ export default function DashboardPage() {
 
       <Card className="border-primary/20 bg-primary/5">
         <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Bot className="w-5 h-5 text-primary" />
-            <CardTitle className="text-base">URL de tu Bot</CardTitle>
-            <Badge variant="success" className="ml-auto">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Bot className="w-5 h-5 text-primary shrink-0" />
+              <CardTitle className="text-base truncate">URL de tu Bot</CardTitle>
+            </div>
+            <Badge variant="success" className="self-start sm:ml-auto shrink-0">
               {tenant?.plan_tier?.toUpperCase() || "BASIC"}
             </Badge>
           </div>

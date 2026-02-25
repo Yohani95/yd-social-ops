@@ -48,10 +48,10 @@ export default function ChatLogsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <MessageSquare className="w-6 h-6" />
-          Chat Logs
+      <div className="min-w-0">
+        <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
+          <MessageSquare className="w-5 h-5 sm:w-6 sm:h-6 shrink-0" />
+          <span className="truncate">Chat Logs</span>
         </h1>
         <p className="text-muted-foreground mt-1">
           Historial de conversaciones del bot
@@ -72,7 +72,7 @@ export default function ChatLogsPage() {
           {logs.map((log) => (
             <Card key={log.id}>
               <CardHeader className="pb-2">
-                <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center justify-between gap-2 sm:gap-4 flex-wrap">
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="text-xs">
                       {channelLabels[log.channel] || log.channel}

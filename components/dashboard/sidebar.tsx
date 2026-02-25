@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { useSidebar } from "@/components/dashboard/sidebar-context";
 import type { Tenant } from "@/types";
 
 interface NavItem {
@@ -49,21 +51,22 @@ const planConfig = {
   enterprise: { label: "Enterprise", color: "success" as const, icon: Crown },
 };
 
-interface SidebarProps {
+interface SidebarContentProps {
   tenant: Tenant | null;
   userRole?: string;
+  onNavigate?: () => void;
 }
 
-export function DashboardSidebar({ tenant, userRole }: SidebarProps) {
+function SidebarContent({ tenant, userRole, onNavigate }: SidebarContentProps) {
   const pathname = usePathname();
   const plan = tenant?.plan_tier || "basic";
   const planInfo = planConfig[plan];
   const PlanIcon = planInfo.icon;
 
   return (
-    <aside className="w-64 flex flex-col bg-sidebar border-r border-sidebar-border shrink-0 h-full">
+    <>
       {/* Logo */}
-      <div className="flex items-center gap-2 px-6 py-5 border-b border-sidebar-border">
+      <div className="flex items-center gap-2 px-4 sm:px-6 py-5 border-b border-sidebar-border">
         <div className="w-8 h-8 rounded-lg bg-sidebar-primary flex items-center justify-center shrink-0">
           <Bot className="w-5 h-5 text-sidebar-primary-foreground" />
         </div>
@@ -96,8 +99,9 @@ export function DashboardSidebar({ tenant, userRole }: SidebarProps) {
               key={item.href}
               href={isLocked ? "/dashboard/settings" : item.href}
               prefetch={false}
+              onClick={onNavigate}
               className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors group relative",
+                "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors group relative min-h-[44px]",
                 isActive
                   ? "bg-sidebar-primary text-sidebar-primary-foreground"
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -140,6 +144,7 @@ export function DashboardSidebar({ tenant, userRole }: SidebarProps) {
           {plan !== "enterprise" && (
             <Link
               href="/pricing"
+              onClick={onNavigate}
               className="text-xs text-sidebar-primary hover:underline shrink-0"
             >
               Upgrade
@@ -147,6 +152,39 @@ export function DashboardSidebar({ tenant, userRole }: SidebarProps) {
           )}
         </div>
       </div>
-    </aside>
+    </>
+  );
+}
+
+interface SidebarProps {
+  tenant: Tenant | null;
+  userRole?: string;
+}
+
+export function DashboardSidebar({ tenant, userRole }: SidebarProps) {
+  const { open, setOpen } = useSidebar();
+
+  return (
+    <>
+      {/* Desktop: sidebar fijo */}
+      <aside className="hidden lg:flex w-64 flex-col bg-sidebar border-r border-sidebar-border shrink-0 h-full">
+        <SidebarContent tenant={tenant} userRole={userRole} />
+      </aside>
+
+      {/* Mobile: Sheet drawer */}
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent
+          side="left"
+          className="w-[min(280px,calc(100vw-2rem))] p-0 flex flex-col bg-sidebar border-sidebar-border [&>button]:text-sidebar-foreground [&>button]:hover:text-sidebar-foreground [&>button]:right-4 [&>button]:top-4"
+          showCloseButton={true}
+        >
+          <SidebarContent
+            tenant={tenant}
+            userRole={userRole}
+            onNavigate={() => setOpen(false)}
+          />
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }

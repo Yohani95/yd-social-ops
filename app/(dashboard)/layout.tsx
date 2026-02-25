@@ -3,6 +3,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { DashboardSidebar } from "@/components/dashboard/sidebar";
 import { DashboardHeader } from "@/components/dashboard/header";
 import { DashboardProvider } from "@/components/dashboard/dashboard-context";
+import { SidebarProvider } from "@/components/dashboard/sidebar-context";
 import type { UserRole } from "@/types";
 
 export default async function DashboardLayout({
@@ -37,12 +38,13 @@ export default async function DashboardLayout({
     : null;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      <DashboardSidebar tenant={tenant} userRole={tenantUser?.role} />
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <DashboardHeader user={user} tenant={tenant} />
-        <main className="flex-1 overflow-y-auto p-6">
-          <DashboardProvider
+    <SidebarProvider>
+      <div className="flex h-screen overflow-hidden bg-background">
+        <DashboardSidebar tenant={tenant} userRole={tenantUser?.role} />
+        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+          <DashboardHeader user={user} tenant={tenant} />
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+            <DashboardProvider
             value={{
               tenant,
               tenantId: tenantUser?.tenant_id || "",
@@ -51,9 +53,10 @@ export default async function DashboardLayout({
             }}
           >
             {children}
-          </DashboardProvider>
-        </main>
+            </DashboardProvider>
+          </main>
+        </div>
       </div>
-    </div>
+    </SidebarProvider>
   );
 }

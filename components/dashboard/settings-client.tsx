@@ -178,7 +178,7 @@ export function SettingsClient({
       </div>
 
       <Tabs defaultValue="general">
-        <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:grid-cols-none lg:inline-flex">
+        <TabsList className="grid w-full grid-cols-2 lg:grid-cols-3 lg:w-auto lg:grid-cols-none lg:inline-flex">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="payments">Pagos</TabsTrigger>
           {plan === "enterprise" && (
@@ -229,7 +229,7 @@ export function SettingsClient({
               {/* Tipo de Negocio */}
               <div className="space-y-4">
                 <h4 className="text-sm font-medium">Tipo de negocio</h4>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 min-w-0">
                   {([
                     { id: "products" as const, label: "Productos", desc: "Venta de productos físicos o digitales" },
                     { id: "services" as const, label: "Servicios", desc: "Arriendos, reservas, tours" },
@@ -377,7 +377,7 @@ export function SettingsClient({
                 {/* Tono del bot */}
                 <div className="space-y-2">
                   <Label>Tono de comunicación</Label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {([
                       { id: "formal" as const, label: "Formal", example: "\"Estimado/a, ¿en qué puedo asistirle?\"" },
                       { id: "amigable" as const, label: "Amigable", example: "\"¡Hola! ¿En qué te puedo ayudar? 😊\"" },
