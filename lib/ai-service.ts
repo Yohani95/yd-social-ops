@@ -3,7 +3,9 @@ import { getMPClient, Preference } from "@/lib/mercadopago";
 import { getAppUrl } from "@/lib/app-url";
 import { notifyN8n } from "@/lib/integrations/n8n";
 import { callAI, callAIWithToolResult, type AIMessage, type AITool } from "@/lib/ai-providers";
+
 import { sendWelcomeEmail } from "@/lib/email";
+
 import type { BotRequest, BotResponse, CaptureContactPayload, Product, Tenant } from "@/types";
 
 type IndustryTemplate =
@@ -914,6 +916,17 @@ export async function processMessage(
       payment_link: paymentLink || null,
       user_message: rawUserMessage,
     }, { tenantId: tenant_id });
+  }
+
+  if (intent === "complaint") {
+    void sendOwnerNewMessageAlertEmail({
+      tenantId: tenant_id,
+      to: tenant.email,
+      businessName: tenant.business_name || "Tu Negocio",
+      channel: request.channel || "web",
+      senderId: request.user_identifier || request.session_id || "Cliente",
+      message: rawUserMessage,
+    });
   }
 
   if (capturedContactId) {
