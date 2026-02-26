@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   business_name            TEXT NOT NULL DEFAULT '',
   -- Plan y suscripción
   plan_tier                TEXT NOT NULL DEFAULT 'basic'
-                           CHECK (plan_tier IN ('basic', 'pro', 'enterprise')),
+                           CHECK (plan_tier IN ('basic', 'pro', 'business', 'enterprise', 'enterprise_plus')),
   saas_subscription_status TEXT NOT NULL DEFAULT 'trial'
                            CHECK (saas_subscription_status IN ('active', 'inactive', 'trial')),
   saas_subscription_id     TEXT,           -- ID de suscripción MP (para el SaaS)
@@ -39,8 +39,19 @@ CREATE TABLE IF NOT EXISTS tenants (
   -- Bot config
   bot_name                 TEXT DEFAULT 'Asistente',
   bot_welcome_message      TEXT DEFAULT '¡Hola! ¿En qué puedo ayudarte hoy?',
-  -- Negocio (extras)
+  bot_tone                 TEXT DEFAULT 'amigable'
+                           CHECK (bot_tone IN ('formal', 'informal', 'amigable')),
+  -- Negocio
+  business_type            TEXT DEFAULT 'products'
+                           CHECK (business_type IN ('products', 'services', 'professional', 'mixed')),
+  business_description     TEXT,
   business_address         TEXT,
+  -- Contacto / acción de venta
+  contact_action           TEXT DEFAULT 'payment_link'
+                           CHECK (contact_action IN ('payment_link', 'whatsapp_contact', 'email_contact', 'custom_message')),
+  contact_whatsapp         TEXT,
+  contact_email            TEXT,
+  contact_custom_message   TEXT,
   -- Metadatos
   created_at               TIMESTAMPTZ DEFAULT NOW(),
   updated_at               TIMESTAMPTZ DEFAULT NOW()

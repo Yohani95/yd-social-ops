@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Loader2, Users, MessageSquare, Save, Download } from "lucide-react";
+import { Loader2, Users, MessageSquare, Save, Download, User, Calendar, Tag, Info } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -141,142 +141,223 @@ export default function ContactsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
-          <Users className="w-5 h-5 sm:w-6 sm:h-6" />
-          Contactos
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          CRM basico: clientes detectados por el bot y su historial reciente
-        </p>
-      </div>
-      <div className="flex justify-end">
-        <Button variant="outline" onClick={handleExportCsv} disabled={isPending}>
-          {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
+            <Users className="w-5 h-5 sm:w-6 sm:h-6" />
+            Contactos
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Gestión de clientes y prospectos detectados por tu asistente IA
+          </p>
+        </div>
+        <Button variant="outline" onClick={handleExportCsv} disabled={isPending} className="sm:w-auto">
+          {isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Download className="w-4 h-4 mr-2" />}
           Exportar CSV
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-1">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Lista de contactos</CardTitle>
-            <CardDescription>{contacts.length} encontrados</CardDescription>
-            <Input
-              placeholder="Buscar por nombre, email, telefono..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Lista de Contactos */}
+        <Card className="lg:col-span-1 shadow-sm border-muted-foreground/10 overflow-hidden">
+          <CardHeader className="pb-4 bg-muted/30 border-b">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-semibold">Base de Clientes</CardTitle>
+              <Badge variant="secondary" className="font-mono">{contacts.length}</Badge>
+            </div>
+            <div className="mt-4">
+              <Input
+                placeholder="Buscar por nombre, email, teléfono..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="bg-background"
+              />
+            </div>
           </CardHeader>
-          <CardContent className="space-y-2 max-h-[70vh] overflow-y-auto">
+          <CardContent className="p-0 overflow-y-auto max-h-[calc(100vh-320px)]">
             {filteredContacts.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No hay contactos aun.</p>
+              <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-3">
+                  <Users className="w-6 h-6 text-muted-foreground/40" />
+                </div>
+                <p className="text-sm text-muted-foreground">No se encontraron contactos.</p>
+              </div>
             ) : (
-              filteredContacts.map((contact) => (
-                <button
-                  key={contact.id}
-                  className={`w-full text-left rounded-md border p-3 transition-colors ${
-                    selectedContact?.id === contact.id
-                      ? "border-primary bg-primary/5"
-                      : "hover:border-primary/40"
-                  }`}
-                  onClick={() => setSelectedContact(contact)}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium truncate">{contact.name || contact.identifier}</p>
-                    <Badge variant="outline" className="text-[10px]">
-                      {channelLabels[contact.channel] || contact.channel}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate mt-1">
-                    {contact.email || contact.phone || contact.identifier}
-                  </p>
-                  {(contact.tags || []).length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {(contact.tags || []).slice(0, 3).map((tag) => (
-                        <Badge key={tag} variant="secondary" className="text-[10px]">
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                  <p className="text-[11px] text-muted-foreground mt-1">
-                    Ultima actividad: {contact.last_seen_at ? formatDate(contact.last_seen_at) : "-"}
-                  </p>
-                </button>
-              ))
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Conversacion</CardTitle>
-            {selectedContact ? (
-              <CardDescription>
-                {selectedContact.name || selectedContact.identifier} | {channelLabels[selectedContact.channel] || selectedContact.channel}
-              </CardDescription>
-            ) : (
-              <CardDescription>Selecciona un contacto</CardDescription>
-            )}
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {!selectedContact ? (
-              <p className="text-sm text-muted-foreground">No hay contacto seleccionado.</p>
-            ) : (
-              <>
-                <div className="rounded-md border p-3 bg-muted/30 max-h-[45vh] overflow-y-auto space-y-2">
-                  {conversation === undefined ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : conversation.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No hay mensajes para este contacto.</p>
-                  ) : (
-                    conversation.map((msg) => (
-                      <div key={msg.id} className="space-y-1">
-                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                          <MessageSquare className="w-3 h-3" />
-                          <span>{formatDate(msg.created_at)}</span>
-                          {msg.intent_detected && <Badge variant="secondary" className="text-[10px]">{msg.intent_detected}</Badge>}
-                        </div>
-                        <p className="text-sm"><strong>Cliente:</strong> {msg.user_message}</p>
-                        <p className="text-sm text-muted-foreground"><strong>Bot:</strong> {msg.bot_response}</p>
+              <div className="divide-y divide-border">
+                {filteredContacts.map((contact) => (
+                  <button
+                    key={contact.id}
+                    className={`w-full text-left p-4 transition-all duration-200 border-l-4 ${selectedContact?.id === contact.id
+                      ? "border-primary bg-primary/5 active shadow-inner"
+                      : "border-transparent hover:bg-muted/50"
+                      }`}
+                    onClick={() => setSelectedContact(contact)}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold truncate text-foreground group-hover:text-primary transition-colors">
+                          {contact.name || contact.identifier}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground truncate font-mono mt-0.5">
+                          {contact.email || contact.phone || contact.identifier}
+                        </p>
                       </div>
-                    ))
-                  )}
-                </div>
+                      <Badge variant="outline" className="text-[9px] shrink-0 font-bold uppercase tracking-tight bg-background">
+                        {channelLabels[contact.channel] || contact.channel}
+                      </Badge>
+                    </div>
 
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Tags</p>
-                  <Input
-                    value={tagsText}
-                    onChange={(e) => setTagsText(e.target.value)}
-                    placeholder="interesado, cold, soporte"
-                  />
-                  <Button onClick={saveTags} disabled={isPending}>
-                    {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    Guardar tags
-                  </Button>
-                </div>
+                    {(contact.tags || []).length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-1">
+                        {(contact.tags || []).slice(0, 3).map((tag) => (
+                          <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded-md bg-secondary text-secondary-foreground font-semibold">
+                            #{tag.toUpperCase()}
+                          </span>
+                        ))}
+                      </div>
+                    )}
 
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Notas internas</p>
-                  <Textarea
-                    rows={4}
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Agrega observaciones de este contacto..."
-                  />
-                  <Button onClick={saveNotes} disabled={isPending}>
-                    {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    Guardar nota
-                  </Button>
-                </div>
-              </>
+                    <div className="mt-3 flex items-center justify-between text-[10px] text-muted-foreground/70">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        {contact.last_seen_at ? formatDate(contact.last_seen_at) : "Sin actividad"}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>
+
+        {/* Detalle y Conversación */}
+        <div className="lg:col-span-2 space-y-6">
+          <Card className="shadow-sm border-muted-foreground/10 h-full flex flex-col min-h-[500px]">
+            <CardHeader className="pb-4 border-b bg-muted/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <User className="w-5 h-5 text-primary" />
+                </div>
+                {selectedContact ? (
+                  <div className="min-w-0">
+                    <CardTitle className="text-lg font-bold truncate">
+                      {selectedContact.name || selectedContact.identifier}
+                    </CardTitle>
+                    <CardDescription className="flex items-center gap-2">
+                      <span className="font-mono text-xs">{selectedContact.identifier}</span>
+                      <span className="text-muted-foreground/20">|</span>
+                      <span className="capitalize">{channelLabels[selectedContact.channel] || selectedContact.channel}</span>
+                    </CardDescription>
+                  </div>
+                ) : (
+                  <div>
+                    <CardTitle className="text-lg">Detalle de Contacto</CardTitle>
+                    <CardDescription>Selecciona un contacto de la lista</CardDescription>
+                  </div>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="flex-1 flex flex-col p-0 overflow-hidden">
+              {!selectedContact ? (
+                <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-muted-foreground">
+                  <Info className="w-10 h-10 mb-2 opacity-20" />
+                  <p>Haz clic en un contacto para ver su historial e información.</p>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col h-[600px]">
+                  {/* Chat / Historial */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/5">
+                    {conversation === undefined ? (
+                      <div className="flex items-center justify-center py-20">
+                        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                      </div>
+                    ) : conversation.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-20 text-muted-foreground opacity-50">
+                        <MessageSquare className="w-8 h-8 mb-2" />
+                        <p className="text-sm italic">Sin historial de mensajes.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        {conversation.map((msg) => (
+                          <div key={msg.id} className="space-y-2">
+                            <div className="flex items-center justify-center">
+                              <span className="text-[10px] bg-muted px-2 py-0.5 rounded-full text-muted-foreground font-medium border border-border/50">
+                                {formatDate(msg.created_at)}
+                              </span>
+                            </div>
+
+                            {/* Mensaje Usuario */}
+                            <div className="flex flex-col items-end group">
+                              <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-none px-4 py-2.5 text-sm shadow-sm max-w-[85%] leading-relaxed">
+                                {msg.user_message}
+                              </div>
+                              {msg.intent_detected && (
+                                <div className="mt-1.5">
+                                  <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 border-yellow-200/50 text-[9px] px-2 py-0 font-bold uppercase tracking-wider shadow-sm">
+                                    Intención: {msg.intent_detected}
+                                  </Badge>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Respuesta Bot */}
+                            <div className="flex flex-col items-start group">
+                              <div className="bg-background border rounded-2xl rounded-tl-none px-4 py-2.5 text-sm shadow-sm max-w-[85%] leading-relaxed border-muted-foreground/10">
+                                {msg.bot_response}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Sidebar de Edición (Notas y Tags) en el mismo panel */}
+                  <div className="border-t p-4 bg-background grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Tag className="w-3.5 h-3.5 text-primary" />
+                        <span className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Etiquetas</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          value={tagsText}
+                          onChange={(e) => setTagsText(e.target.value)}
+                          placeholder="interesado, cliente, vip..."
+                          className="text-sm h-9"
+                        />
+                        <Button size="sm" onClick={saveTags} disabled={isPending} className="h-9">
+                          {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                        </Button>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground font-medium">Separados por comas</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Save className="w-3.5 h-3.5 text-primary" />
+                        <span className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Notas Internas</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Textarea
+                          rows={1}
+                          value={notes}
+                          onChange={(e) => setNotes(e.target.value)}
+                          placeholder="Observaciones importantes..."
+                          className="text-sm min-h-[36px] resize-none py-2"
+                        />
+                        <Button size="sm" onClick={saveNotes} disabled={isPending} className="h-9">
+                          {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                        </Button>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground font-medium">Solo visible para tu equipo</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

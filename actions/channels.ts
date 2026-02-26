@@ -195,3 +195,44 @@ export async function syncWhatsAppChannel(channelId: string): Promise<ActionResu
   revalidatePath("/dashboard/channels");
   return { success: true, data: { phone_number_id: phoneNumberId, waba_id: wabaId } };
 }
+
+export async function subscribeMetaWebhook(channelId: string): Promise<ActionResult> {
+  const ctx = await getAuthenticatedContext();
+  if (!ctx) return { success: false, error: "No autenticado" };
+
+  const { data: channel } = await ctx.supabase
+    .from("social_channels")
+    .select("channel_type, access_token, provider_config")
+    .eq("id", channelId)
+    .eq("tenant_id", ctx.tenantId)
+    .single();
+
+  if (!channel) return { success: false, error: "Canal no encontrado" };
+  if (!channel.access_token) return { success: false, error: "No hay token de Meta" };
+
+  const providerConfig = channel.provider_config as Record<string, string>;
+  const pageId = providerConfig?.page_id;
+
+  if (!pageId) return { success: false, error: "No se encontró el ID de la Página" };
+
+  try {
+    let fields = "messages,messaging_postbacks";
+    if (channel.channel_type === "instagram") {
+      fields = "messages,messaging_postbacks,instagram_manage_messages";
+    }
+
+    const url = `https://graph.facebook.com/v21.0/${pageId}/subscribed_apps?subscribed_fields=${fields}&access_token=${channel.access_token}`;
+
+    const response = await fetch(url, { method: "POST" });
+    const result = await response.json();
+
+    if (result.success) {
+      return { success: true };
+    } else {
+      console.error("Error al suscribir webhook:", result);
+      return { success: false, error: result.error?.message || "Error desconocido en Meta" };
+    }
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}

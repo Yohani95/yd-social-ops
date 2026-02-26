@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /dashboard/
+Disallow: /login
+Disallow: /register
+
+Sitemap: https://ydsocialops.com/sitemap.xml
+
+# YD Social Ops - Bot de ventas con IA

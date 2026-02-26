@@ -15,6 +15,7 @@ import {
   Zap,
   Play,
   Wand2,
+  Server,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +38,13 @@ const navItems: NavItem[] = [
   { label: "Chat Logs", href: "/dashboard/chat-logs", icon: MessageSquare },
   { label: "Contactos", href: "/dashboard/contacts", icon: Users },
   {
+    label: "Equipo",
+    href: "/dashboard/team",
+    icon: Users,
+    badge: "Enterprise",
+    requiredPlan: "enterprise",
+  },
+  {
     label: "Canales",
     href: "/dashboard/channels",
     icon: Share2,
@@ -47,12 +55,35 @@ const navItems: NavItem[] = [
     icon: Play,
   },
   { label: "Configuración", href: "/dashboard/settings", icon: Settings },
+  {
+    label: "API Keys",
+    href: "/dashboard/settings/api-keys",
+    icon: Settings, // using settings icon or could use KeyRound if imported
+    badge: "Enterprise",
+    requiredPlan: "enterprise",
+  },
+  {
+    label: "MCP Servers",
+    href: "/dashboard/settings/mcp",
+    icon: Server, // need to import Server from lucide-react
+    badge: "Enterprise+",
+    requiredPlan: "enterprise",
+  },
+  {
+    label: "Marca Propia",
+    href: "/dashboard/settings/branding",
+    icon: Wand2,
+    badge: "Enterprise+",
+    requiredPlan: "enterprise",
+  },
 ];
 
 const planConfig = {
   basic: { label: "Plan Básico", color: "secondary" as const, icon: Bot },
   pro: { label: "Plan Pro", color: "default" as const, icon: Zap },
+  business: { label: "Plan Business", color: "default" as const, icon: Zap },
   enterprise: { label: "Enterprise", color: "success" as const, icon: Crown },
+  enterprise_plus: { label: "Enterprise+", color: "success" as const, icon: Crown },
 };
 
 interface SidebarContentProps {
@@ -63,20 +94,24 @@ interface SidebarContentProps {
 
 function SidebarContent({ tenant, userRole, onNavigate }: SidebarContentProps) {
   const pathname = usePathname();
-  const plan = tenant?.plan_tier || "basic";
-  const planInfo = planConfig[plan];
+  const plan = (tenant?.plan_tier as keyof typeof planConfig) || "basic";
+  const planInfo = planConfig[plan] || planConfig.basic;
   const PlanIcon = planInfo.icon;
 
   return (
     <>
       {/* Logo */}
       <div className="flex items-center gap-2 px-4 sm:px-6 py-5 border-b border-sidebar-border">
-        <div className="w-8 h-8 rounded-lg bg-sidebar-primary flex items-center justify-center shrink-0">
-          <Bot className="w-5 h-5 text-sidebar-primary-foreground" />
-        </div>
+        {tenant?.white_label_logo ? (
+          <img src={tenant.white_label_logo} alt="Logo" className="w-8 h-8 rounded-lg object-contain shrink-0 bg-white" />
+        ) : (
+          <div className="w-8 h-8 rounded-lg bg-sidebar-primary flex items-center justify-center shrink-0">
+            <Bot className="w-5 h-5 text-sidebar-primary-foreground" />
+          </div>
+        )}
         <div className="min-w-0">
           <p className="text-sm font-bold text-sidebar-foreground truncate">
-            YD Social Ops
+            {tenant?.white_label_name || "YD Social Ops"}
           </p>
           <p className="text-xs text-sidebar-foreground/60 truncate">
             {tenant?.business_name || "Mi Negocio"}
@@ -89,7 +124,14 @@ function SidebarContent({ tenant, userRole, onNavigate }: SidebarContentProps) {
         {navItems.map((item) => {
           const isActive =
             pathname === item.href ||
-            (item.href !== "/dashboard" && pathname.startsWith(item.href));
+            (item.href !== "/dashboard" &&
+              pathname.startsWith(item.href) &&
+              !navItems.some(
+                (other) =>
+                  other.href !== item.href &&
+                  other.href.startsWith(item.href) &&
+                  pathname.startsWith(other.href)
+              ));
 
           const isLocked =
             item.requiredPlan &&

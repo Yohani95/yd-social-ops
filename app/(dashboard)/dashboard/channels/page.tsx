@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState, useTransition, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Share2,
@@ -45,7 +45,14 @@ import {
   toggleChannel,
   deleteChannel,
   syncWhatsAppChannel,
+  subscribeMetaWebhook,
 } from "@/actions/channels";
+import {
+  WhatsAppIcon,
+  MessengerIcon,
+  InstagramIcon,
+  TikTokIcon,
+} from "@/components/ui/social-icons";
 import type { SocialChannel, ChatChannel } from "@/types";
 
 const CHANNEL_INFO: Record<
@@ -53,7 +60,7 @@ const CHANNEL_INFO: Record<
   {
     label: string;
     color: string;
-    icon: string;
+    icon: ReactNode;
     description: string;
     steps: { title: string; description: string; link?: string }[];
   }
@@ -61,7 +68,7 @@ const CHANNEL_INFO: Record<
   web: {
     label: "Web Widget",
     color: "bg-violet-600",
-    icon: "🌐",
+    icon: <Globe className="w-5 h-5 text-white" />,
     description: "Chat embebido en tu sitio web",
     steps: [
       { title: "Canal creado automáticamente", description: "El widget web está listo para usar" },
@@ -72,7 +79,7 @@ const CHANNEL_INFO: Record<
   whatsapp: {
     label: "WhatsApp Business",
     color: "bg-green-600",
-    icon: "💬",
+    icon: <WhatsAppIcon className="text-white" size={20} />,
     description: "Responder mensajes de WhatsApp automáticamente",
     steps: [
       { title: "Cuenta WhatsApp Business", description: "Necesitas una cuenta de WhatsApp Business", link: "https://business.whatsapp.com/" },
@@ -83,7 +90,7 @@ const CHANNEL_INFO: Record<
   messenger: {
     label: "Messenger",
     color: "bg-blue-600",
-    icon: "💙",
+    icon: <MessengerIcon className="text-white" size={20} />,
     description: "Responder mensajes de Facebook Messenger. Incluye mensajes desde Marketplace si tu Página tiene anuncios.",
     steps: [
       { title: "Página de Facebook", description: "Necesitas una Página de Facebook activa", link: "https://www.facebook.com/pages/create" },
@@ -93,8 +100,8 @@ const CHANNEL_INFO: Record<
   },
   instagram: {
     label: "Instagram",
-    color: "bg-pink-600",
-    icon: "📸",
+    color: "bg-gradient-to-br from-purple-600 via-pink-600 to-orange-500",
+    icon: <InstagramIcon className="text-white" size={20} />,
     description: "Mensajes directos de Instagram via API",
     steps: [
       { title: "Cuenta profesional", description: "Tu cuenta debe ser Profesional o Business", link: "https://help.instagram.com/502981923235522" },
@@ -105,7 +112,7 @@ const CHANNEL_INFO: Record<
   tiktok: {
     label: "TikTok",
     color: "bg-gray-900",
-    icon: "🎵",
+    icon: <TikTokIcon className="text-white" size={20} />,
     description: "Mensajes directos de TikTok for Business",
     steps: [
       { title: "TikTok for Business", description: "Necesitas una cuenta de TikTok for Business", link: "https://www.tiktok.com/business/" },
@@ -139,7 +146,7 @@ export default function ChannelsPage() {
 
   useEffect(() => {
     if (searchParams.get("meta_success")) {
-      getChannels().then(setChannels).catch(() => {});
+      getChannels().then(setChannels).catch(() => { });
       toast.success("Canal de Meta conectado. Si no ves el número, usa «Sincronizar número».");
     }
     if (searchParams.get("meta_error")) {
@@ -312,7 +319,7 @@ export default function ChannelsPage() {
             const info = CHANNEL_INFO[ch.channel_type] || {
               label: ch.channel_type,
               color: "bg-gray-500",
-              icon: "📡",
+              icon: <MessageSquare className="w-5 h-5 text-white" />,
               description: "",
               steps: [],
             };
@@ -330,7 +337,7 @@ export default function ChannelsPage() {
                 <CardHeader className="pb-3">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-10 h-10 shrink-0 rounded-lg ${info.color} flex items-center justify-center text-lg`}>
+                      <div className={`w-10 h-10 shrink-0 rounded-lg ${info.color} flex items-center justify-center`}>
                         {info.icon}
                       </div>
                       <div className="min-w-0">
@@ -366,9 +373,8 @@ export default function ChannelsPage() {
                           const isCompleted = ch.is_active && i < 2;
                           return (
                             <div key={i} className="flex items-start gap-3 py-1.5">
-                              <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                                isCompleted ? "bg-green-500 text-white" : "border-2 border-muted-foreground/30"
-                              }`}>
+                              <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${isCompleted ? "bg-green-500 text-white" : "border-2 border-muted-foreground/30"
+                                }`}>
                                 {isCompleted ? <Check className="w-3 h-3" /> : <Circle className="w-2 h-2" />}
                               </div>
                               <div className="flex-1 min-w-0">
@@ -435,10 +441,32 @@ export default function ChannelsPage() {
                               Sincronizar número
                             </Button>
                           )}
+                          {(ch.channel_type === "messenger" || ch.channel_type === "instagram") && ch.access_token && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={isPending}
+                              onClick={() => {
+                                startTransition(async () => {
+                                  const result = await subscribeMetaWebhook(ch.id);
+                                  if (result.success) {
+                                    toast.success("Webhook suscrito correctamente en Meta.");
+                                  } else {
+                                    toast.error(result.error || "Error al suscribir webhook");
+                                  }
+                                });
+                              }}
+                            >
+                              {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5 mr-1" />}
+                              Suscribir Webhook
+                            </Button>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground break-words">
                           {ch.access_token
-                            ? "Si Facebook te devolvió sin pedir elegir número, usa «Sincronizar número» para obtener el ID desde el token."
+                            ? ch.channel_type === "whatsapp"
+                              ? "Si Facebook te devolvió sin pedir elegir número, usa «Sincronizar número» para obtener el ID desde el token."
+                              : "Si configuras tu canal aquí y en Meta, usa «Suscribir Webhook» para conectarlos."
                             : "Se abrirá Facebook para que autorices la conexión. Requiere META_APP_ID configurado."}
                         </p>
                       </div>
@@ -597,14 +625,15 @@ function AddChannelDialog({
                 <button
                   key={type}
                   type="button"
-                  className={`p-3 rounded-lg border text-left transition-colors min-w-0 ${
-                    selectedType === type
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:border-primary/50"
-                  }`}
+                  className={`p-3 rounded-lg border text-left transition-colors min-w-0 ${selectedType === type
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/50"
+                    }`}
                   onClick={() => setSelectedType(type)}
                 >
-                  <div className="text-lg mb-1">{info.icon}</div>
+                  <div className="w-10 h-10 mb-2 flex items-center justify-center rounded-lg bg-muted text-muted-foreground shrink-0 shadow-sm border border-border/50 transition-colors group-hover:bg-white/10">
+                    {info.icon}
+                  </div>
                   <p className="text-sm font-medium">{info.label}</p>
                   <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
                     {info.description}

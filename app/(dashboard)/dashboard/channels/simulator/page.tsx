@@ -15,6 +15,13 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useDashboard } from "@/components/dashboard/dashboard-context";
 import type { ChatChannel } from "@/types";
+import {
+  WhatsAppIcon,
+  MessengerIcon,
+  TikTokIcon,
+  InstagramIcon,
+} from "@/components/ui/social-icons";
+import { Globe } from "lucide-react";
 
 interface ChatMessage {
   id: string;
@@ -29,11 +36,37 @@ interface ChatMessage {
   };
 }
 
-const CHANNEL_STYLES: Record<string, { bg: string; accent: string; label: string; icon: string }> = {
-  whatsapp: { bg: "bg-[#0b141a]", accent: "bg-[#005c4b]", label: "WhatsApp", icon: "💬" },
-  messenger: { bg: "bg-[#0a1128]", accent: "bg-[#0084ff]", label: "Messenger", icon: "💙" },
-  tiktok: { bg: "bg-[#121212]", accent: "bg-[#ff0050]", label: "TikTok", icon: "🎵" },
-  web: { bg: "bg-background", accent: "bg-primary", label: "Web Widget", icon: "🌐" },
+const CHANNEL_STYLES: Record<string, { bg: string; accent: string; label: string; icon: React.ReactNode }> = {
+  whatsapp: {
+    bg: "bg-[#0b141a]",
+    accent: "bg-[#005c4b]",
+    label: "WhatsApp",
+    icon: <WhatsAppIcon size={18} className="text-inherit" />
+  },
+  messenger: {
+    bg: "bg-[#0a1128]",
+    accent: "bg-[#0084ff]",
+    label: "Messenger",
+    icon: <MessengerIcon size={18} className="text-inherit" />
+  },
+  tiktok: {
+    bg: "bg-[#121212]",
+    accent: "bg-[#ff0050]",
+    label: "TikTok",
+    icon: <TikTokIcon size={18} className="text-inherit" />
+  },
+  instagram: {
+    bg: "bg-gradient-to-br from-purple-900 to-pink-900",
+    accent: "bg-gradient-to-r from-purple-500 to-pink-500",
+    label: "Instagram",
+    icon: <InstagramIcon size={18} className="text-inherit" />
+  },
+  web: {
+    bg: "bg-background",
+    accent: "bg-primary",
+    label: "Web Widget",
+    icon: <Globe size={18} className="text-inherit" />
+  },
 };
 
 export default function SimulatorPage() {
@@ -170,13 +203,14 @@ export default function SimulatorPage() {
             <button
               key={ch}
               onClick={() => setChannel(ch)}
-              className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all flex items-center gap-2 ${
-                channel === ch
-                  ? "border-primary bg-primary/10 shadow-sm"
-                  : "border-border hover:border-primary/50"
-              }`}
+              className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all flex items-center gap-2 ${channel === ch
+                ? "border-primary bg-primary/10 shadow-sm"
+                : "border-border hover:border-primary/50"
+                }`}
             >
-              <span>{s.icon}</span>
+              <div className="flex items-center justify-center shrink-0">
+                {s.icon}
+              </div>
               {s.label}
             </button>
           );
@@ -211,19 +245,18 @@ export default function SimulatorPage() {
                   className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                      msg.role === "user"
-                        ? channel === "whatsapp"
-                          ? "bg-[#005c4b] text-white"
-                          : channel === "messenger"
-                            ? "bg-[#0084ff] text-white"
-                            : channel === "tiktok"
-                              ? "bg-[#ff0050] text-white"
-                              : "bg-primary text-primary-foreground"
-                        : channel !== "web"
-                          ? "bg-white/10 text-white"
-                          : "bg-muted"
-                    }`}
+                    className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${msg.role === "user"
+                      ? channel === "whatsapp"
+                        ? "bg-[#005c4b] text-white"
+                        : channel === "messenger"
+                          ? "bg-[#0084ff] text-white"
+                          : channel === "tiktok"
+                            ? "bg-[#ff0050] text-white"
+                            : "bg-primary text-primary-foreground"
+                      : channel !== "web"
+                        ? "bg-white/10 text-white"
+                        : "bg-muted"
+                      }`}
                   >
                     <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                     <div className="flex items-center gap-2 mt-1">

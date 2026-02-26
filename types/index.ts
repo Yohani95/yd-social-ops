@@ -2,7 +2,7 @@
 // YD Social Ops — Tipos TypeScript del Dominio
 // ============================================================
 
-export type PlanTier = "basic" | "pro" | "enterprise";
+export type PlanTier = "basic" | "pro" | "business" | "enterprise" | "enterprise_plus";
 export type SubscriptionStatus = "active" | "inactive" | "trial";
 export type UserRole = "owner" | "admin" | "member";
 export type ChatChannel = "web" | "whatsapp" | "messenger" | "instagram" | "tiktok";
@@ -43,6 +43,7 @@ export interface Tenant {
   white_label_domain: string | null;
   white_label_name: string | null;
   white_label_logo: string | null;
+  white_label_primary_color: string | null;
   // Negocio
   business_type: BusinessType;
   business_description: string | null;

@@ -171,6 +171,33 @@ export async function GET(request: NextRequest) {
 
     const supabase = createServiceClient();
 
+    const finalAccessToken = channel_type === "messenger" || channel_type === "instagram"
+      ? (providerConfig.page_access_token as string) || accessToken
+      : accessToken;
+
+    if (channel_type === "messenger" || channel_type === "instagram") {
+      const pageId = providerConfig.page_id as string;
+      if (pageId && finalAccessToken) {
+        const fields = channel_type === "instagram"
+          ? "messages,messaging_postbacks,instagram_manage_messages"
+          : "messages,messaging_postbacks";
+
+        try {
+          const subRes = await fetch(`https://graph.facebook.com/v21.0/${pageId}/subscribed_apps?subscribed_fields=${fields}&access_token=${finalAccessToken}`, {
+            method: "POST"
+          });
+          const subData = await subRes.json();
+          if (!subData.success) {
+            console.error("[Meta OAuth] Error al suscribir webhook:", subData);
+          } else {
+            console.info(`[Meta OAuth] Webhook suscrito exitosamente para ${channel_type} page ${pageId}`);
+          }
+        } catch (subErr) {
+          console.error("[Meta OAuth] Exception al suscribir webhook:", subErr);
+        }
+      }
+    }
+
     const { data: existing } = await supabase
       .from("social_channels")
       .select("id")
@@ -182,9 +209,7 @@ export async function GET(request: NextRequest) {
       await supabase
         .from("social_channels")
         .update({
-          access_token: channel_type === "messenger" || channel_type === "instagram"
-            ? (providerConfig.page_access_token as string) || accessToken
-            : accessToken,
+          access_token: finalAccessToken,
           provider_config: providerConfig,
           is_active: true,
           connected_at: new Date().toISOString(),
@@ -203,9 +228,7 @@ export async function GET(request: NextRequest) {
         tenant_id,
         channel_type,
         display_name: displayName,
-        access_token: channel_type === "messenger" || channel_type === "instagram"
-          ? (providerConfig.page_access_token as string) || accessToken
-          : accessToken,
+        access_token: finalAccessToken,
         webhook_url: webhookUrl,
         provider_config: providerConfig,
         config: {},

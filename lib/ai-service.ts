@@ -3,6 +3,7 @@ import { getMPClient, Preference } from "@/lib/mercadopago";
 import { getAppUrl } from "@/lib/app-url";
 import { notifyN8n } from "@/lib/integrations/n8n";
 import { callAI, callAIWithToolResult, type AIMessage, type AITool } from "@/lib/ai-providers";
+import { sendWelcomeEmail } from "@/lib/email";
 import type { BotRequest, BotResponse, CaptureContactPayload, Product, Tenant } from "@/types";
 
 type IndustryTemplate =
@@ -69,6 +70,10 @@ function sanitizeUserInput(input: string): string {
     /jailbreak/i,
     /\[system\]/i,
     /<\/?system>/i,
+    /DAN\s+mode/i,
+    /disregard\s+previous/i,
+    /developer\s+mode/i,
+    /output\s+source\s+code/i,
   ];
 
   const isInjection = injectionPatterns.some((p) => p.test(trimmed));
@@ -230,6 +235,8 @@ DISPONIBILIDAD POR FECHAS:
   return `Eres ${botName}, ${roleLabel[businessType] || "asistente virtual"} de "${businessName}".${businessDesc}${addressSection}
 Tu objetivo es ${goalLabel[businessType] || goalLabel.mixed}.
 
+HOY ES: ${new Date().toLocaleDateString('es-CL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}. Siempre usa esto como referencia para calcular fechas de check-in, check-out o reservas.
+
 ${catalog}
 
 TONO DE COMUNICACION:
@@ -281,11 +288,11 @@ function buildCatalogSection(products: Product[], businessType: string): string 
     const stockStr = p.item_type === "product"
       ? ` | Stock: ${p.stock} ${unitLabel}${p.stock === 1 ? "" : "es"}`
       : p.item_type === "service"
-        ? p.stock > 0
-          ? businessType === "services"
-            ? ` | Disponibilidad: ${p.stock} ${unitLabel}${p.stock === 1 ? "" : "es"} para reservar`
-            : ` | Disponibilidad: ${p.stock} ${unitLabel}${p.stock === 1 ? "" : "es"}`
-          : " | Sin disponibilidad por ahora"
+        ? businessType === "services" || businessType === "professional"
+          ? " | Requiere verificacion de agenda/fechas"
+          : p.stock > 0
+            ? ` | Disponibilidad: ${p.stock} ${unitLabel}${p.stock === 1 ? "" : "es"}`
+            : " | Sin disponibilidad por ahora"
         : "";
 
     const descStr = p.description ? ` | ${p.description}` : "";
@@ -582,6 +589,22 @@ async function executeCaptureContactData(params: {
     if (error) {
       console.warn("[AI Service] capture_contact_data failed:", error.message);
       return { ok: false, reason: error.message };
+    }
+
+    // Round 3: Send welcome email if email is present
+    if (email) {
+      const { data: tenantData } = await supabase
+        .from("tenants")
+        .select("business_name")
+        .eq("id", params.tenantId)
+        .single();
+
+      if (tenantData?.business_name) {
+        // Ejecutamos en segundo plano para no bloquear al bot
+        sendWelcomeEmail(email, tenantData.business_name).catch((err: any) =>
+          console.error("[AI Service] Error sending welcome mail:", err)
+        );
+      }
     }
 
     return { ok: true, contactId: data?.id as string | undefined };
@@ -926,18 +949,37 @@ function detectIntent(
     "precio",
     "costo",
     "cuanto",
+    "cuánto",
     "pagar",
     "llevar",
     "adquirir",
     "reservar",
     "reserva",
+    "cotizar",
+    "cotización",
+    "cotizacion",
+    "presupuesto",
+    "agendar",
+    "disponibilidad",
+    "disponible",
+    "contratar",
+    "sena",
+    "seña",
+    "anticipo",
+    "transferir",
+    "transferencia",
   ];
   const greetingKeywords = ["hola", "buenos", "buen dia", "buenas", "saludos"];
   const complaintKeywords = ["problema", "queja", "mal", "error", "falla", "defecto", "roto"];
 
-  if (purchaseKeywords.some((k) => lower.includes(k))) return "purchase_intent";
-  if (greetingKeywords.some((k) => lower.includes(k))) return "greeting";
-  if (complaintKeywords.some((k) => lower.includes(k))) return "complaint";
+  const hasPurchase = purchaseKeywords.some((k) => lower.includes(k));
+  const hasGreeting = greetingKeywords.some((k) => lower.includes(k));
+  const hasComplaint = complaintKeywords.some((k) => lower.includes(k));
+
+  // Priority: purchase > complaint > greeting > inquiry
+  if (hasPurchase) return "purchase_intent";
+  if (hasComplaint) return "complaint";
+  if (hasGreeting) return "greeting";
 
   return "inquiry";
 }
