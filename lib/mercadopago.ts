@@ -1,5 +1,6 @@
 import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
 import { safeDecrypt } from "@/lib/encryption";
+import { getAppUrl } from "@/lib/app-url";
 
 /**
  * Crea un cliente MP con el access token del TENANT.
@@ -37,10 +38,10 @@ export function getSaaSMPClient(): MercadoPagoConfig {
  */
 export function getMPOAuthUrl(tenantId: string): string {
   const clientId = process.env.MP_CLIENT_ID;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const appUrl = getAppUrl("");
 
   if (!clientId || !appUrl) {
-    throw new Error("MP_CLIENT_ID o NEXT_PUBLIC_APP_URL no están configurados");
+    throw new Error("MP_CLIENT_ID o APP_URL no estan configurados");
   }
 
   const redirectUri = `${appUrl}/api/auth/mercadopago/callback`;
@@ -75,7 +76,7 @@ export async function exchangeMPCode(
       client_secret: process.env.MP_CLIENT_SECRET,
       grant_type: "authorization_code",
       code,
-      redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/mercadopago/callback`,
+      redirect_uri: `${getAppUrl()}/api/auth/mercadopago/callback`,
     }),
   });
 
@@ -89,3 +90,4 @@ export async function exchangeMPCode(
 
 // Re-exportar clases de MP para uso en Server Actions
 export { Preference, Payment };
+

@@ -1,5 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { getAppUrl } from "@/lib/app-url";
+
+const META_OAUTH_NONCE_COOKIE = "yd_oauth_nonce_meta";
+const OAUTH_STATE_MAX_AGE_MS = 15 * 60 * 1000;
+
+function redirectWithMetaCookieClear(url: string) {
+  const response = NextResponse.redirect(url);
+  response.cookies.set(META_OAUTH_NONCE_COOKIE, "", {
+    path: "/",
+    maxAge: 0,
+    sameSite: "lax",
+  });
+  return response;
+}
 
 /**
  * GET /api/auth/meta/callback
@@ -13,30 +27,64 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const code = searchParams.get("code");
   const state = searchParams.get("state");
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const appUrl = getAppUrl();
 
   if (!code || !state) {
-    return NextResponse.redirect(`${appUrl}/dashboard/channels?meta_error=missing_params`);
+    return redirectWithMetaCookieClear(`${appUrl}/dashboard/channels?meta_error=missing_params`);
   }
 
-  let stateData: { tenant_id: string; channel_type: string };
+  let stateData: { tenant_id: string; channel_type: string; nonce: string; ts: number };
   try {
     stateData = JSON.parse(Buffer.from(state, "base64url").toString());
   } catch {
-    return NextResponse.redirect(`${appUrl}/dashboard/channels?meta_error=invalid_state`);
+    return redirectWithMetaCookieClear(`${appUrl}/dashboard/channels?meta_error=invalid_state`);
   }
 
-  const { tenant_id, channel_type } = stateData;
+  const { tenant_id, channel_type, nonce, ts } = stateData;
+  const cookieNonce = request.cookies.get(META_OAUTH_NONCE_COOKIE)?.value;
+  const stateAge = Date.now() - Number(ts || 0);
+  const nonceValid = typeof nonce === "string" && nonce.length >= 8 && cookieNonce === nonce;
+  const stateFresh = Number.isFinite(stateAge) && stateAge >= 0 && stateAge <= OAUTH_STATE_MAX_AGE_MS;
+  if (!nonceValid || !stateFresh) {
+    return redirectWithMetaCookieClear(`${appUrl}/dashboard/channels?meta_error=invalid_state`);
+  }
+
+  const allowedChannelTypes = new Set(["whatsapp", "messenger", "instagram"]);
+  if (!allowedChannelTypes.has(channel_type)) {
+    return redirectWithMetaCookieClear(`${appUrl}/dashboard/channels?meta_error=invalid_channel_type`);
+  }
 
   const metaAppId = process.env.META_APP_ID;
   const metaAppSecret = process.env.META_APP_SECRET;
   const redirectUri = `${appUrl}/api/auth/meta/callback`;
 
   if (!metaAppId || !metaAppSecret) {
-    return NextResponse.redirect(`${appUrl}/dashboard/channels?meta_error=config_missing`);
+    return redirectWithMetaCookieClear(`${appUrl}/dashboard/channels?meta_error=config_missing`);
   }
 
   try {
+    const authClient = await createClient();
+    const {
+      data: { user },
+    } = await authClient.auth.getUser();
+
+    if (!user) {
+      return redirectWithMetaCookieClear(`${appUrl}/dashboard/channels?meta_error=unauthorized_state`);
+    }
+
+    const securityClient = createServiceClient();
+    const { data: membership } = await securityClient
+      .from("tenant_users")
+      .select("tenant_id")
+      .eq("user_id", user.id)
+      .eq("tenant_id", tenant_id)
+      .maybeSingle();
+
+    if (!membership) {
+      console.warn("[Meta OAuth] unauthorized state. user=%s tenant=%s", user.id, tenant_id);
+      return redirectWithMetaCookieClear(`${appUrl}/dashboard/channels?meta_error=unauthorized_state`);
+    }
+
     const tokenUrl = new URL("https://graph.facebook.com/v21.0/oauth/access_token");
     tokenUrl.searchParams.set("client_id", metaAppId);
     tokenUrl.searchParams.set("client_secret", metaAppSecret);
@@ -48,7 +96,7 @@ export async function GET(request: NextRequest) {
 
     if (!tokenData.access_token) {
       console.error("[Meta OAuth] Token exchange failed:", tokenData);
-      return NextResponse.redirect(`${appUrl}/dashboard/channels?meta_error=token_failed`);
+      return redirectWithMetaCookieClear(`${appUrl}/dashboard/channels?meta_error=token_failed`);
     }
 
     const accessToken = tokenData.access_token;
@@ -166,9 +214,9 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return NextResponse.redirect(`${appUrl}/dashboard/channels?meta_success=true`);
+    return redirectWithMetaCookieClear(`${appUrl}/dashboard/channels?meta_success=true`);
   } catch (error) {
     console.error("[Meta OAuth] Error:", error);
-    return NextResponse.redirect(`${appUrl}/dashboard/channels?meta_error=unknown`);
+    return redirectWithMetaCookieClear(`${appUrl}/dashboard/channels?meta_error=unknown`);
   }
 }

@@ -179,6 +179,29 @@ export default function ChannelsPage() {
     toast.success(`${label} copiado`);
   }
 
+  function encodeBase64Url(value: string): string {
+    const bytes = new TextEncoder().encode(value);
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function generateNonce(size = 24): string {
+    const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const random = new Uint8Array(size);
+    crypto.getRandomValues(random);
+    let out = "";
+    for (let i = 0; i < random.length; i += 1) {
+      out += alphabet[random[i] % alphabet.length];
+    }
+    return out;
+  }
+
+  function setOAuthNonceCookie(name: string, nonce: string) {
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${name}=${nonce}; Max-Age=900; Path=/; SameSite=Lax${secure}`;
+  }
+
   function handleConnectMeta(channelType: "whatsapp" | "messenger" | "instagram") {
     const metaAppId = process.env.NEXT_PUBLIC_META_APP_ID;
     if (!metaAppId) {
@@ -186,8 +209,15 @@ export default function ChannelsPage() {
       return;
     }
     const appUrl = window.location.origin;
-    const stateJson = JSON.stringify({ tenant_id: tenantId, channel_type: channelType });
-    const state = btoa(stateJson).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const nonce = generateNonce();
+    setOAuthNonceCookie("yd_oauth_nonce_meta", nonce);
+    const stateJson = JSON.stringify({
+      tenant_id: tenantId,
+      channel_type: channelType,
+      nonce,
+      ts: Date.now(),
+    });
+    const state = encodeBase64Url(stateJson);
     const redirectUri = `${appUrl}/api/auth/meta/callback`;
     const scopes =
       channelType === "whatsapp"

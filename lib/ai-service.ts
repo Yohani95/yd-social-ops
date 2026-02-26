@@ -1,18 +1,30 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getMPClient, Preference } from "@/lib/mercadopago";
+import { getAppUrl } from "@/lib/app-url";
+import { notifyN8n } from "@/lib/integrations/n8n";
 import { callAI, callAIWithToolResult, type AIMessage, type AITool } from "@/lib/ai-providers";
-import type { BotRequest, BotResponse, Product, Tenant } from "@/types";
+import type { BotRequest, BotResponse, CaptureContactPayload, Product, Tenant } from "@/types";
+
+type IndustryTemplate =
+  | "cabins_airbnb"
+  | "retail_store"
+  | "professional_services"
+  | "delivery_restaurant"
+  | "spa_wellness"
+  | "veterinary"
+  | "general";
 
 // ============================================================
-// PASO A: Obtener contexto del tenant
+// STEP A: Tenant context
 // ============================================================
 async function getTenantContext(tenantId: string): Promise<{
   tenant: Tenant;
   products: Product[];
+  mcpServers: Array<{ name: string; url: string; auth_type: string }>;
 }> {
   const supabase = createServiceClient();
 
-  const [tenantResult, productsResult] = await Promise.all([
+  const [tenantResult, productsResult, mcpServersResult] = await Promise.all([
     supabase.from("tenants").select("*").eq("id", tenantId).single(),
     supabase
       .from("products")
@@ -20,6 +32,12 @@ async function getTenantContext(tenantId: string): Promise<{
       .eq("tenant_id", tenantId)
       .eq("is_active", true)
       .order("name"),
+    supabase
+      .from("mcp_servers")
+      .select("name,url,auth_type")
+      .eq("tenant_id", tenantId)
+      .eq("is_active", true)
+      .order("created_at", { ascending: true }),
   ]);
 
   if (tenantResult.error || !tenantResult.data) {
@@ -29,27 +47,156 @@ async function getTenantContext(tenantId: string): Promise<{
   return {
     tenant: tenantResult.data as Tenant,
     products: (productsResult.data as Product[]) ?? [],
+    mcpServers:
+      mcpServersResult.error || !Array.isArray(mcpServersResult.data)
+        ? []
+        : (mcpServersResult.data as Array<{ name: string; url: string; auth_type: string }>),
   };
 }
 
 // ============================================================
-// PASO B: Construir System Prompt dinámico y flexible
+// Security: prompt injection guard
 // ============================================================
-function buildSystemPrompt(tenant: Tenant, products: Product[]): string {
+function sanitizeUserInput(input: string): string {
+  const trimmed = input.slice(0, 500);
+
+  const injectionPatterns = [
+    /ignora\s+(todas?|tus|mis|las)/i,
+    /olvida\s+(todo|tus|las\s+instrucciones)/i,
+    /eres\s+ahora/i,
+    /nuevo\s+sistema\s+de\s+prompt/i,
+    /act\s+as\s+/i,
+    /jailbreak/i,
+    /\[system\]/i,
+    /<\/?system>/i,
+  ];
+
+  const isInjection = injectionPatterns.some((p) => p.test(trimmed));
+  if (isInjection) {
+    console.warn("[Security] Prompt injection attempt:", trimmed.slice(0, 100));
+    return "Hola, tengo una consulta sobre sus servicios.";
+  }
+
+  return trimmed
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .replace(/<[^>]*>/g, "")
+    .trim();
+}
+
+// ============================================================
+// STEP B: Dynamic system prompt
+// ============================================================
+function detectIndustryTemplate(tenant: Tenant, products: Product[]): IndustryTemplate {
+  const businessType = tenant.business_type || "products";
+  const combined = [
+    tenant.business_name || "",
+    tenant.business_description || "",
+    ...products.map((p) => `${p.name} ${p.description || ""} ${(p.keywords || []).join(" ")}`),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  if (/\b(veterin|mascota|perro|gato|emergencia veterin)\b/i.test(combined)) {
+    return "veterinary";
+  }
+
+  if (/\b(spa|masaje|relaj|wellness|facial|depil|terapia)\b/i.test(combined)) {
+    return "spa_wellness";
+  }
+
+  if (/\b(delivery|resto|restaurante|pizza|menu|pedido|domicilio)\b/i.test(combined)) {
+    return "delivery_restaurant";
+  }
+
+  if (/\b(caba|airbnb|check-?in|check-?out|huesped|noches?)\b/i.test(combined)) {
+    return "cabins_airbnb";
+  }
+
+  if (businessType === "professional") return "professional_services";
+  if (businessType === "products") return "retail_store";
+
+  return "general";
+}
+
+function buildIndustryTemplateInstructions(template: IndustryTemplate): string {
+  switch (template) {
+    case "cabins_airbnb":
+      return `PLANTILLA DE INDUSTRIA: CABANAS / AIRBNB
+- Solicita SIEMPRE check-in, check-out y cantidad de huespedes antes de confirmar precio o disponibilidad.
+- Si el cliente entrega fechas, calcula noches de forma explicita y confirma el total.
+- Si faltan datos, pregunta solo lo faltante.
+- Enfoca el cierre en reserva y sena/anticipo segun medio de pago configurado.`;
+    case "retail_store":
+      return `PLANTILLA DE INDUSTRIA: TIENDA FISICA / E-COMMERCE
+- Prioriza disponibilidad real (stock), variantes y precio.
+- Si no hay stock, ofrece alternativa cercana del catalogo.
+- Responde de forma directa para acelerar decision de compra.`;
+    case "professional_services":
+      return `PLANTILLA DE INDUSTRIA: SERVICIO PROFESIONAL
+- No trates los servicios como stock fisico.
+- Enfoca la conversacion en tipo de consulta, modalidad y agenda.
+- Invita a agendar por el canal de contacto configurado cuando haya intencion clara.`;
+    case "delivery_restaurant":
+      return `PLANTILLA DE INDUSTRIA: DELIVERY / RESTAURANTE
+- Presenta opciones por categoria o combos cuando aplique.
+- Si preguntan por pedido, solicita direccion/zona y preferencia principal.
+- Mantiene respuestas breves y orientadas a cierre de pedido.`;
+    case "spa_wellness":
+      return `PLANTILLA DE INDUSTRIA: SPA / WELLNESS
+- Prioriza duracion, profesional/servicio y horario tentativo.
+- Si el cliente quiere reservar, pide fecha, hora y cantidad de personas si aplica.
+- Refuerza beneficios concretos del servicio sin inventar informacion.`;
+    case "veterinary":
+      return `PLANTILLA DE INDUSTRIA: VETERINARIA
+- Solicita tipo de mascota, motivo de consulta y nivel de urgencia.
+- Si detectas urgencia alta, deriva de inmediato al canal directo configurado.
+- Para consultas no urgentes, orienta a agendar y confirma datos basicos.`;
+    case "general":
+    default:
+      return `PLANTILLA DE INDUSTRIA: GENERAL
+- Ajusta la conversacion al tipo de item consultado (producto, servicio o informacion).
+- Prioriza claridad, precision y siguiente paso para convertir la consulta en accion.`;
+  }
+}
+
+function buildMcpInstructions(mcpServers: Array<{ name: string; url: string; auth_type: string }>): string {
+  if (!mcpServers.length) {
+    return "INTEGRACIONES MCP: No hay servidores MCP activos para este tenant.";
+  }
+
+  const lines = mcpServers.map((server) => {
+    return `- ${server.name} (${server.auth_type}) -> ${server.url}`;
+  });
+
+  return `INTEGRACIONES MCP ACTIVAS:
+${lines.join("\n")}
+
+REGLAS MCP:
+- Puedes mencionar que existen integraciones tecnicas disponibles si el cliente pregunta por automatizaciones o sistemas externos.
+- Nunca expongas secretos, tokens, headers de autenticacion ni credenciales.
+- No inventes acciones ejecutadas sobre MCP si no hay confirmacion explicita del sistema.`;
+}
+
+function buildSystemPrompt(
+  tenant: Tenant,
+  products: Product[],
+  mcpServers: Array<{ name: string; url: string; auth_type: string }>
+): string {
   const botName = tenant.bot_name || "Asistente";
   const businessName = tenant.business_name || "nuestro negocio";
   const businessType = tenant.business_type || "products";
+  const industryTemplate = detectIndustryTemplate(tenant, products);
   const businessDesc = tenant.business_description
-    ? `\nDESCRIPCIÓN DEL NEGOCIO: ${tenant.business_description}`
+    ? `\nDESCRIPCION DEL NEGOCIO: ${tenant.business_description}`
     : "";
   const addressSection = tenant.business_address
-    ? `\nDIRECCIÓN: ${tenant.business_address}`
+    ? `\nDIRECCION: ${tenant.business_address}`
     : "";
 
   const roleLabel: Record<string, string> = {
     products: "asistente de ventas virtual",
     services: "asistente de reservas y servicios",
-    professional: "asistente virtual de atención",
+    professional: "asistente virtual de atencion",
     mixed: "asistente virtual",
   };
 
@@ -61,21 +208,23 @@ function buildSystemPrompt(tenant: Tenant, products: Product[]): string {
   };
 
   const catalog = buildCatalogSection(products, businessType);
+  const industryInstructions = buildIndustryTemplateInstructions(industryTemplate);
   const toneInstructions = buildToneInstructions(tenant.bot_tone || "amigable");
   const contactInstructions = buildContactInstructions(tenant);
+  const mcpInstructions = buildMcpInstructions(mcpServers);
   const behaviorInstructions = `
-CONTEXTO Y AMBIGÜEDAD:
-- Si el cliente responde con una sola palabra o número ("2", "si", "ok"), interpreta según la última pregunta que hiciste (ej. "2" = 2 noches si preguntaste cuántas noches).
-- Si no está claro, pregunta amablemente para aclarar.
+CONTEXTO Y AMBIGUEDAD:
+- Si el cliente responde con una sola palabra o numero ("2", "si", "ok"), interpreta segun la ultima pregunta que hiciste.
+- Si no esta claro, pregunta amablemente para aclarar.
 
-CONCISIÓN:
-- No repitas información que ya hayas dado en la conversación. Si el cliente ya sabe el precio o los horarios, no los vuelvas a mencionar salvo que pregunte.
+CONCISION:
+- No repitas informacion que ya hayas dado en la conversacion.
 
 IDENTIDAD:
-- Si te preguntan qué modelo de IA eres, responde que eres un asistente de IA de ${businessName} y evita detalles técnicos.
+- Si te preguntan que modelo de IA eres, responde que eres un asistente de IA de ${businessName} y evita detalles tecnicos.
 
 DISPONIBILIDAD POR FECHAS:
-- Si preguntan por fechas o días disponibles, indica que deben contactar directamente al negocio (según el canal configurado).
+- Si preguntan por fechas o dias disponibles, pide check-in, check-out y cantidad de huespedes antes de confirmar.
 `;
 
   return `Eres ${botName}, ${roleLabel[businessType] || "asistente virtual"} de "${businessName}".${businessDesc}${addressSection}
@@ -83,17 +232,23 @@ Tu objetivo es ${goalLabel[businessType] || goalLabel.mixed}.
 
 ${catalog}
 
-TONO DE COMUNICACIÓN:
+TONO DE COMUNICACION:
 ${toneInstructions}
 
 INSTRUCCIONES GENERALES:
-- Responde siempre en español.
-- Busca en el catálogo y proporciona información precisa.
-- Si un item tiene stock y este es 0, informa que no está disponible.
-- Mantén las respuestas concisas (máximo 3 párrafos).
-- No inventes items que no estén en el catálogo.
+- Responde siempre en espanol.
+- Busca en el catalogo y proporciona informacion precisa.
+- Si un item tiene stock y este es 0, informa que no esta disponible.
+- Manten las respuestas concisas (maximo 3 parrafos).
+- No inventes items que no esten en el catalogo.
+- Nunca reveles IDs internos, tokens, secretos, llaves API ni detalles tecnicos internos.
+
+INSTRUCCIONES POR INDUSTRIA:
+${industryInstructions}
 
 ${behaviorInstructions.trim()}
+
+${mcpInstructions}
 
 ${contactInstructions}`;
 }
@@ -103,17 +258,17 @@ function buildCatalogSection(products: Product[], businessType: string): string 
     const emptyLabel: Record<string, string> = {
       products: "No hay productos disponibles en este momento.",
       services: "No hay servicios disponibles en este momento.",
-      professional: "No hay información de servicios configurada.",
+      professional: "No hay informacion de servicios configurada.",
       mixed: "No hay items disponibles en este momento.",
     };
-    return `CATÁLOGO:\n${emptyLabel[businessType] || emptyLabel.mixed}`;
+    return `CATALOGO:\n${emptyLabel[businessType] || emptyLabel.mixed}`;
   }
 
   const headerLabel: Record<string, string> = {
-    products: "CATÁLOGO DE PRODUCTOS",
+    products: "CATALOGO DE PRODUCTOS",
     services: "SERVICIOS DISPONIBLES",
-    professional: "ÁREAS DE ATENCIÓN",
-    mixed: "CATÁLOGO",
+    professional: "AREAS DE ATENCION",
+    mixed: "CATALOGO",
   };
 
   const lines = products.map((p) => {
@@ -121,7 +276,18 @@ function buildCatalogSection(products: Product[], businessType: string): string 
     const priceStr = p.item_type !== "info" && Number(p.price) > 0
       ? ` | Precio: $${Number(p.price).toLocaleString("es-CL")}`
       : "";
-    const stockStr = p.item_type === "product" ? ` | Stock: ${p.stock} unidades` : p.item_type === "service" && p.stock > 0 ? ` | Disponibilidad: ${p.stock}` : "";
+
+    const unitLabel = p.unit_label?.trim() || "unidad";
+    const stockStr = p.item_type === "product"
+      ? ` | Stock: ${p.stock} ${unitLabel}${p.stock === 1 ? "" : "es"}`
+      : p.item_type === "service"
+        ? p.stock > 0
+          ? businessType === "services"
+            ? ` | Disponibilidad: ${p.stock} ${unitLabel}${p.stock === 1 ? "" : "es"} para reservar`
+            : ` | Disponibilidad: ${p.stock} ${unitLabel}${p.stock === 1 ? "" : "es"}`
+          : " | Sin disponibilidad por ahora"
+        : "";
+
     const descStr = p.description ? ` | ${p.description}` : "";
     return `- ${typeTag} ${p.name} (ID: ${p.id})${priceStr}${stockStr}${descStr}`;
   });
@@ -134,38 +300,47 @@ function buildToneInstructions(tone: string): string {
     case "formal":
       return "- Trata al cliente de usted.\n- No uses emojis.\n- Lenguaje corporativo, respetuoso y profesional.";
     case "informal":
-      return "- Tutea al cliente.\n- Puedes usar emojis con moderación.\n- Lenguaje casual y cercano, como si hablaras con un amigo.";
+      return "- Tutea al cliente.\n- Puedes usar emojis con moderacion.\n- Lenguaje casual y cercano.";
     case "amigable":
     default:
-      return "- Equilibrio entre profesional y cercano.\n- Puedes usar emojis ocasionalmente.\n- Tono cálido pero respetuoso.";
+      return "- Equilibrio entre profesional y cercano.\n- Puedes usar emojis ocasionalmente.\n- Tono calido pero respetuoso.";
   }
 }
 
 function buildContactInstructions(tenant: Tenant): string {
   const contactAction = tenant.contact_action || "payment_link";
+  const isServicesBusiness = tenant.business_type === "services";
+  const servicesRules = isServicesBusiness
+    ? `
+
+REGLAS OBLIGATORIAS PARA RESERVAS (SERVICIOS):
+- Antes de confirmar precio final o disponibilidad, solicita SIEMPRE: fecha check-in, fecha check-out y cantidad de huespedes.
+- Si falta alguno de esos datos, pide el dato faltante.
+- Si el cliente solo dice "quiero reservar", inicia con esas tres preguntas.`
+    : "";
 
   switch (contactAction) {
     case "whatsapp_contact": {
       const wa = tenant.contact_whatsapp || "";
       const waClean = wa.replace(/[^0-9]/g, "");
       return `CUANDO EL CLIENTE QUIERA COMPRAR/RESERVAR/CONTRATAR:
-- Proporciona toda la información relevante del catálogo.
+- Proporciona toda la informacion relevante del catalogo.
 - Indica al cliente que para concretar, puede contactar directamente por WhatsApp: https://wa.me/${waClean}
-- NO generes links de pago ni menciones sistemas de pago automáticos.`;
+- NO generes links de pago ni menciones sistemas de pago automaticos.${servicesRules}`;
     }
     case "email_contact": {
       const email = tenant.contact_email || "";
       return `CUANDO EL CLIENTE QUIERA COMPRAR/RESERVAR/CONTRATAR:
-- Proporciona toda la información relevante del catálogo.
+- Proporciona toda la informacion relevante del catalogo.
 - Indica al cliente que para concretar, puede escribir a: ${email}
-- NO generes links de pago ni menciones sistemas de pago automáticos.`;
+- NO generes links de pago ni menciones sistemas de pago automaticos.${servicesRules}`;
     }
     case "custom_message": {
-      const msg = tenant.contact_custom_message || "Contacta directamente al negocio para más información.";
+      const msg = tenant.contact_custom_message || "Contacta directamente al negocio para mas informacion.";
       return `CUANDO EL CLIENTE QUIERA COMPRAR/RESERVAR/CONTRATAR:
-- Proporciona toda la información relevante del catálogo.
+- Proporciona toda la informacion relevante del catalogo.
 - Responde con este mensaje de contacto: ${msg}
-- NO generes links de pago ni menciones sistemas de pago automáticos.`;
+- NO generes links de pago ni menciones sistemas de pago automaticos.${servicesRules}`;
     }
     case "payment_link":
     default: {
@@ -174,50 +349,50 @@ function buildContactInstructions(tenant: Tenant): string {
         !!tenant.mp_access_token;
 
       if (usePaymentTool) {
-        return `MÉTODO DE PAGO (AUTOMÁTICO):
+        return `METODO DE PAGO (AUTOMATICO):
 Cuando un cliente quiera comprar:
-1. Confirma qué producto/servicio quiere y la cantidad.
+1. Confirma que producto/servicio quiere y la cantidad.
 2. Verifica stock/disponibilidad.
-3. Llama a la función "generate_payment_link" con el product_id correspondiente.
-4. El sistema generará automáticamente un link de pago seguro.
-- SIEMPRE usa la función generate_payment_link, no inventes URLs.
-- Si no hay stock, informa amablemente y ofrece alternativas.`;
+3. Llama a la funcion "generate_payment_link" con el product_id correspondiente.
+4. El sistema generara automaticamente un link de pago seguro.
+- SIEMPRE usa la funcion generate_payment_link, no inventes URLs.
+- Si no hay stock, informa amablemente y ofrece alternativas.${servicesRules}`;
       }
 
-      // Plan básico O plan Pro/Enterprise sin MP conectado: usar transferencia
       const bankDetails =
         tenant.bank_details?.trim() ||
         "Datos bancarios no configurados. Indica al cliente que contacte directamente al negocio para concretar el pago.";
-      return `MÉTODO DE PAGO (TRANSFERENCIA BANCARIA):
-Los links de pago automáticos NO están disponibles. Tu ÚNICA opción es compartir los datos de transferencia.
+
+      return `METODO DE PAGO (TRANSFERENCIA BANCARIA):
+Los links de pago automaticos NO estan disponibles. Tu UNICA opcion es compartir los datos de transferencia.
 
 Cuando un cliente quiera comprar, pagar, reservar, o pida "datos de transferencia", "transferir", "datos bancarios":
-- INCLUYE SIEMPRE los datos completos en tu respuesta. Es OBLIGATORIO.
-- NUNCA digas que no puedes proporcionarlos. Los datos están abajo, compártelos.
-- NO los resumas ni omitas. El cliente los necesita para transferir.
+- INCLUYE SIEMPRE los datos completos en tu respuesta. Es obligatorio.
+- NUNCA digas que no puedes proporcionarlos.
+- NO los resumas ni omitas.
 
-DATOS DE TRANSFERENCIA (copiar íntegramente en tu respuesta):
+DATOS DE TRANSFERENCIA (copiar integramente en tu respuesta):
 ${bankDetails}
 
-- Indica al cliente que envíe el comprobante por este mismo chat o WhatsApp.
-- NO ofrezcas links de pago ni menciones Mercado Pago (no está disponible).`;
+- Indica al cliente que envie el comprobante por este mismo chat o WhatsApp.
+- NO ofrezcas links de pago ni menciones Mercado Pago (no esta disponible).${servicesRules}`;
     }
   }
 }
 
 // ============================================================
-// Tool definition (compatible con OpenAI y Gemini)
+// Tools
 // ============================================================
 const generatePaymentLinkTool: AITool = {
   name: "generate_payment_link",
   description:
-    "Genera un link de pago de Mercado Pago para que el cliente pueda pagar de forma segura. Úsalo cuando el cliente confirme que quiere comprar.",
+    "Genera un link de pago de Mercado Pago para que el cliente pueda pagar de forma segura. Usalo cuando el cliente confirme que quiere comprar.",
   parameters: {
     type: "object",
     properties: {
       product_id: {
         type: "string",
-        description: "El ID del producto a comprar (del catálogo)",
+        description: "El ID del producto a comprar (del catalogo)",
       },
       quantity: {
         type: "number",
@@ -229,8 +404,25 @@ const generatePaymentLinkTool: AITool = {
   },
 };
 
+const captureContactDataTool: AITool = {
+  name: "capture_contact_data",
+  description: "Guarda datos del cliente cuando los mencione en la conversacion.",
+  parameters: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Nombre del cliente si lo menciono" },
+      email: { type: "string", description: "Email si lo proporciono" },
+      phone: { type: "string", description: "Telefono si lo dio" },
+      intent: {
+        type: "string",
+        enum: ["buying", "browsing", "support"],
+      },
+    },
+  },
+};
+
 // ============================================================
-// Ejecutar tool: generar preferencia de pago MP
+// Tool executors
 // ============================================================
 async function executeGeneratePaymentLink(
   args: { product_id: string; quantity?: number },
@@ -240,7 +432,7 @@ async function executeGeneratePaymentLink(
   const product = products.find((p) => p.id === args.product_id);
 
   if (!product) {
-    return { error: "Producto no encontrado en el catálogo." };
+    return { error: "Producto no encontrado en el catalogo." };
   }
 
   const quantity = args.quantity || 1;
@@ -252,13 +444,13 @@ async function executeGeneratePaymentLink(
   }
 
   if (!tenant.mp_access_token) {
-    return { error: "El sistema de pagos no está configurado aún." };
+    return { error: "El sistema de pagos no esta configurado aun." };
   }
 
   try {
     const mpClient = getMPClient(tenant.mp_access_token);
     const preference = new Preference(mpClient);
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const appUrl = getAppUrl();
 
     const result = await preference.create({
       body: {
@@ -277,6 +469,7 @@ async function executeGeneratePaymentLink(
           pending: `${appUrl}/payment/pending`,
         },
         auto_return: "approved",
+        notification_url: `${appUrl}/api/webhooks/payment?tenant_id=${tenant.id}`,
         metadata: {
           tenant_id: tenant.id,
           product_id: product.id,
@@ -291,12 +484,223 @@ async function executeGeneratePaymentLink(
     };
   } catch (error) {
     console.error("[AI Service] Error generando preferencia MP:", error);
-    return { error: "No se pudo generar el link de pago. Intenta más tarde." };
+    return { error: "No se pudo generar el link de pago. Intenta mas tarde." };
+  }
+}
+
+function normalizeEmail(email: unknown): string | null {
+  if (typeof email !== "string") return null;
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) return null;
+  return normalized;
+}
+
+function normalizePhone(phone: unknown): string | null {
+  if (typeof phone !== "string") return null;
+  const normalized = phone.replace(/[^0-9+]/g, "").trim();
+  return normalized || null;
+}
+
+function tagsFromContactIntent(intent?: CaptureContactPayload["intent"]): string[] {
+  if (intent === "buying") return ["interesado"];
+  if (intent === "support") return ["soporte"];
+  if (intent === "browsing") return ["navegando"];
+  return [];
+}
+
+function tagFromDetectedIntent(intent: BotResponse["intent_detected"]): string | null {
+  if (intent === "purchase_intent") return "pregunto_precio";
+  if (intent === "complaint") return "soporte";
+  if (intent === "inquiry") return "navegando";
+  return null;
+}
+
+async function executeCaptureContactData(params: {
+  tenantId: string;
+  channel: string;
+  identifier?: string;
+  payload: CaptureContactPayload;
+}): Promise<{ ok: boolean; contactId?: string; reason?: string }> {
+  if (!params.identifier) {
+    return { ok: false, reason: "missing_identifier" };
+  }
+
+  const name = typeof params.payload.name === "string" ? params.payload.name.trim().slice(0, 120) : null;
+  const email = normalizeEmail(params.payload.email);
+  const phone = normalizePhone(params.payload.phone);
+
+  if (!name && !email && !phone && !params.payload.intent) {
+    return { ok: false, reason: "no_data" };
+  }
+
+  try {
+    const supabase = createServiceClient();
+    const { data: existing } = await supabase
+      .from("contacts")
+      .select("id, tags, metadata")
+      .eq("tenant_id", params.tenantId)
+      .eq("channel", params.channel)
+      .eq("identifier", params.identifier)
+      .maybeSingle();
+
+    const metadata: Record<string, unknown> = {
+      ...(existing?.metadata && typeof existing.metadata === "object"
+        ? (existing.metadata as Record<string, unknown>)
+        : {}),
+    };
+    if (params.payload.intent) metadata.last_intent = params.payload.intent;
+
+    const existingTags = Array.isArray(existing?.tags)
+      ? existing!.tags.filter((t): t is string => typeof t === "string" && !!t.trim())
+      : [];
+    const mergedTags = Array.from(
+      new Set([...existingTags, ...tagsFromContactIntent(params.payload.intent)].map((t) => t.toLowerCase()))
+    ).slice(0, 20);
+
+    const { data, error } = await supabase
+      .from("contacts")
+      .upsert(
+        {
+          id: existing?.id,
+          tenant_id: params.tenantId,
+          channel: params.channel,
+          identifier: params.identifier,
+          name,
+          email,
+          phone,
+          tags: mergedTags,
+          metadata,
+          last_seen_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "tenant_id,channel,identifier" }
+      )
+      .select("id")
+      .single();
+
+    if (error) {
+      console.warn("[AI Service] capture_contact_data failed:", error.message);
+      return { ok: false, reason: error.message };
+    }
+
+    return { ok: true, contactId: data?.id as string | undefined };
+  } catch (error) {
+    console.warn("[AI Service] capture_contact_data exception:", error);
+    return { ok: false, reason: "exception" };
+  }
+}
+
+async function upsertContactIntentTag(params: {
+  tenantId: string;
+  channel: string;
+  identifier?: string;
+  intent: BotResponse["intent_detected"];
+}): Promise<void> {
+  if (!params.identifier) return;
+  const tag = tagFromDetectedIntent(params.intent);
+  if (!tag) return;
+
+  try {
+    const supabase = createServiceClient();
+    const { data: existing, error } = await supabase
+      .from("contacts")
+      .select("id, tags, metadata")
+      .eq("tenant_id", params.tenantId)
+      .eq("channel", params.channel)
+      .eq("identifier", params.identifier)
+      .maybeSingle();
+
+    if (error || !existing) return;
+
+    const tags = Array.from(
+      new Set([
+        ...(Array.isArray(existing.tags) ? existing.tags : []),
+        tag,
+      ]
+        .filter((value): value is string => typeof value === "string" && !!value.trim())
+        .map((value) => value.toLowerCase()))
+    ).slice(0, 20);
+
+    const metadata = {
+      ...(existing.metadata && typeof existing.metadata === "object"
+        ? (existing.metadata as Record<string, unknown>)
+        : {}),
+      last_intent_detected: params.intent,
+    };
+
+    await supabase
+      .from("contacts")
+      .update({
+        tags,
+        metadata,
+        last_seen_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existing.id)
+      .eq("tenant_id", params.tenantId);
+  } catch (error) {
+    console.warn("[AI Service] upsertContactIntentTag exception:", error);
+  }
+}
+
+async function upsertConversationMemory(params: {
+  tenantId: string;
+  sessionId?: string;
+  contactId?: string;
+  userMessage: string;
+  botMessage: string;
+  intent?: BotResponse["intent_detected"];
+}): Promise<void> {
+  if (!params.sessionId) return;
+
+  try {
+    const supabase = createServiceClient();
+    const { data: existing, error: readError } = await supabase
+      .from("conversation_memory")
+      .select("id, messages, context")
+      .eq("tenant_id", params.tenantId)
+      .eq("session_id", params.sessionId)
+      .single();
+
+    if (readError && readError.code !== "PGRST116") {
+      console.warn("[AI Service] conversation_memory read failed:", readError.message);
+      return;
+    }
+
+    const previousMessages = Array.isArray(existing?.messages) ? existing.messages : [];
+    const nextMessages = [
+      ...previousMessages,
+      { role: "user", content: params.userMessage, ts: new Date().toISOString() },
+      { role: "assistant", content: params.botMessage, ts: new Date().toISOString() },
+    ].slice(-40);
+
+    const nextContext: Record<string, unknown> = {
+      ...(existing?.context && typeof existing.context === "object" ? (existing.context as Record<string, unknown>) : {}),
+    };
+
+    if (params.intent) nextContext.last_intent_detected = params.intent;
+
+    await supabase.from("conversation_memory").upsert(
+      {
+        id: existing?.id,
+        tenant_id: params.tenantId,
+        session_id: params.sessionId,
+        contact_id: params.contactId || null,
+        messages: nextMessages,
+        context: nextContext,
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "tenant_id,session_id" }
+    );
+  } catch (error) {
+    console.warn("[AI Service] conversation_memory upsert exception:", error);
   }
 }
 
 // ============================================================
-// Historial de conversación por session_id
+// Conversation history by session_id
 // ============================================================
 async function getChatHistory(
   tenantId: string,
@@ -325,27 +729,26 @@ async function getChatHistory(
 }
 
 // ============================================================
-// FUNCIÓN PRINCIPAL: processMessage
+// MAIN FUNCTION: processMessage
 // ============================================================
 export async function processMessage(
   request: BotRequest
 ): Promise<BotResponse> {
-  const { tenant_id, user_message } = request;
+  const { tenant_id } = request;
+  const rawUserMessage = request.user_message;
+  const sanitizedUserMessage = sanitizeUserInput(rawUserMessage) || "Hola";
 
-  // Obtener contexto
-  const { tenant, products } = await getTenantContext(tenant_id);
+  const { tenant, products, mcpServers } = await getTenantContext(tenant_id);
 
-  // Verificar suscripción
   if (tenant.saas_subscription_status === "inactive") {
     return {
       message:
-        "El servicio no está disponible en este momento. Por favor contacta al administrador.",
+        "El servicio no esta disponible en este momento. Por favor contacta al administrador.",
       intent_detected: "unknown",
     };
   }
 
-  // Construir mensajes (con historial si hay session_id)
-  const systemPrompt = buildSystemPrompt(tenant, products);
+  const systemPrompt = buildSystemPrompt(tenant, products, mcpServers);
   const usePaymentTools =
     (tenant.contact_action || "payment_link") === "payment_link" &&
     (tenant.plan_tier === "pro" || tenant.plan_tier === "enterprise") &&
@@ -369,18 +772,19 @@ export async function processMessage(
   const messages: AIMessage[] = [
     { role: "system", content: systemPrompt },
     ...chatHistory,
-    { role: "user", content: user_message },
+    { role: "user", content: sanitizedUserMessage },
   ];
 
-  const tools = usePaymentTools ? [generatePaymentLinkTool] : undefined;
+  const tools: AITool[] = [];
+  if (usePaymentTools) tools.push(generatePaymentLinkTool);
+  if (request.user_identifier || request.session_id) tools.push(captureContactDataTool);
 
-  // Llamar a la IA (con fallback automático)
-  let aiResponse = await callAI(messages, tools);
+  let aiResponse = await callAI(messages, tools.length > 0 ? tools : undefined);
 
   let paymentLink: string | undefined;
   let detectedProductId: string | undefined;
+  let capturedContactId: string | undefined;
 
-  // Procesar tool calls si los hay
   if (aiResponse.toolCalls && aiResponse.toolCalls.length > 0) {
     for (const toolCall of aiResponse.toolCalls) {
       if (toolCall.name === "generate_payment_link") {
@@ -404,7 +808,35 @@ export async function processMessage(
           });
         }
 
-        // Segunda llamada con resultado del tool (usar mismo modelo Groq si aplica)
+        aiResponse = await callAIWithToolResult(
+          messages,
+          aiResponse.provider,
+          toolCall.id,
+          toolCall.name,
+          toolResultContent,
+          undefined,
+          aiResponse.modelUsed
+        );
+      }
+
+      if (toolCall.name === "capture_contact_data") {
+        const captureResult = await executeCaptureContactData({
+          tenantId: tenant_id,
+          channel: request.channel || "web",
+          identifier: request.user_identifier || request.session_id,
+          payload: toolCall.arguments as CaptureContactPayload,
+        });
+
+        if (captureResult.contactId) {
+          capturedContactId = captureResult.contactId;
+        }
+
+        const toolResultContent = JSON.stringify({
+          ok: captureResult.ok,
+          reason: captureResult.reason,
+          contact_id: captureResult.contactId,
+        });
+
         aiResponse = await callAIWithToolResult(
           messages,
           aiResponse.provider,
@@ -418,13 +850,11 @@ export async function processMessage(
     }
   }
 
-  // Detectar intención
-  const intent = detectIntent(user_message, paymentLink);
+  const intent = detectIntent(sanitizedUserMessage, paymentLink);
 
-  // Guardar log
   await saveChatLog({
     tenant_id,
-    user_message,
+    user_message: rawUserMessage,
     bot_response: aiResponse.content,
     intent_detected: intent,
     product_id: detectedProductId,
@@ -435,6 +865,43 @@ export async function processMessage(
     tokens_used: aiResponse.tokensUsed,
   });
 
+  await upsertContactIntentTag({
+    tenantId: tenant_id,
+    channel: request.channel || "web",
+    identifier: request.user_identifier || request.session_id,
+    intent,
+  });
+
+  await upsertConversationMemory({
+    tenantId: tenant_id,
+    sessionId: request.session_id,
+    contactId: capturedContactId,
+    userMessage: rawUserMessage,
+    botMessage: aiResponse.content,
+    intent,
+  });
+
+  if (intent === "purchase_intent") {
+    void notifyN8n("purchase_intent", {
+      tenant_id,
+      channel: request.channel || "web",
+      user_identifier: request.user_identifier || null,
+      session_id: request.session_id || null,
+      product_id: detectedProductId || null,
+      payment_link: paymentLink || null,
+      user_message: rawUserMessage,
+    }, { tenantId: tenant_id });
+  }
+
+  if (capturedContactId) {
+    void notifyN8n("contact_captured", {
+      tenant_id,
+      contact_id: capturedContactId,
+      channel: request.channel || "web",
+      user_identifier: request.user_identifier || request.session_id || null,
+    }, { tenantId: tenant_id });
+  }
+
   return {
     message: aiResponse.content || "No pude procesar tu mensaje.",
     payment_link: paymentLink,
@@ -444,9 +911,8 @@ export async function processMessage(
 }
 
 // ============================================================
-// HELPERS
+// Helpers
 // ============================================================
-
 function detectIntent(
   message: string,
   hasPaymentLink?: string
@@ -454,8 +920,19 @@ function detectIntent(
   if (hasPaymentLink) return "purchase_intent";
 
   const lower = message.toLowerCase();
-  const purchaseKeywords = ["comprar", "quiero", "precio", "costo", "cuánto", "pagar", "llevar", "adquirir"];
-  const greetingKeywords = ["hola", "buenos", "buen día", "buenas", "saludos"];
+  const purchaseKeywords = [
+    "comprar",
+    "quiero",
+    "precio",
+    "costo",
+    "cuanto",
+    "pagar",
+    "llevar",
+    "adquirir",
+    "reservar",
+    "reserva",
+  ];
+  const greetingKeywords = ["hola", "buenos", "buen dia", "buenas", "saludos"];
   const complaintKeywords = ["problema", "queja", "mal", "error", "falla", "defecto", "roto"];
 
   if (purchaseKeywords.some((k) => lower.includes(k))) return "purchase_intent";

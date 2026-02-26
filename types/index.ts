@@ -10,6 +10,7 @@ export type BusinessType = "products" | "services" | "professional" | "mixed";
 export type ContactAction = "payment_link" | "whatsapp_contact" | "email_contact" | "custom_message";
 export type BotTone = "formal" | "informal" | "amigable";
 export type ItemType = "product" | "service" | "info";
+export type AvailabilityType = "stock" | "calendar" | "quota";
 export type IntentType =
   | "purchase_intent"
   | "inquiry"
@@ -104,6 +105,10 @@ export interface Product {
   description: string | null;
   price: number;
   stock: number;
+  unit_label: string | null;
+  availability_type: AvailabilityType | null;
+  min_quantity: number | null;
+  max_quantity: number | null;
   keywords: string[] | null;
   image_url: string | null;
   item_type: ItemType;
@@ -115,7 +120,8 @@ export interface Product {
 export type ProductCreate = Pick<
   Product,
   "name" | "description" | "price" | "stock" | "keywords" | "image_url" | "item_type"
->;
+> &
+  Partial<Pick<Product, "unit_label" | "availability_type" | "min_quantity" | "max_quantity">>;
 
 export type ProductUpdate = Partial<ProductCreate> & { is_active?: boolean };
 
@@ -176,6 +182,93 @@ export interface BotResponse {
   payment_link?: string;
   intent_detected?: IntentType;
   product_id?: string;
+}
+
+export type ContactIntent = "buying" | "browsing" | "support";
+
+export interface Contact {
+  id: string;
+  tenant_id: string;
+  channel: ChatChannel;
+  identifier: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  tags: string[];
+  notes: string | null;
+  metadata: Record<string, unknown>;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type McpAuthType = "none" | "bearer" | "api_key";
+export type IntegrationProvider = "resend" | "n8n" | "smtp" | "gmail_oauth";
+
+export interface McpServer {
+  id: string;
+  tenant_id: string;
+  name: string;
+  url: string;
+  auth_type: McpAuthType;
+  auth_secret: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface TenantIntegration {
+  id: string;
+  tenant_id: string;
+  provider: IntegrationProvider;
+  is_active: boolean;
+  config: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationMemoryMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+  ts: string;
+}
+
+export interface ConversationMemory {
+  id: string;
+  tenant_id: string;
+  session_id: string;
+  contact_id: string | null;
+  messages: ConversationMemoryMessage[];
+  context: Record<string, unknown>;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CaptureContactPayload {
+  name?: string;
+  email?: string;
+  phone?: string;
+  intent?: ContactIntent;
+}
+
+export interface PaymentEvent {
+  id: string;
+  tenant_id: string;
+  payment_id: string;
+  status: string;
+  product_id: string | null;
+  quantity: number;
+  payer_email: string | null;
+  amount: number;
+  currency: string;
+  stock_updated: boolean;
+  email_sent: boolean;
+  processed: boolean;
+  processed_at: string | null;
+  raw_payload: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 // ============================================================

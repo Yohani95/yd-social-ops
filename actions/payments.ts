@@ -3,6 +3,7 @@
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getMPClient, getSaaSMPClient, Preference } from "@/lib/mercadopago";
 import { updateStock } from "@/actions/products";
+import { getAppUrl } from "@/lib/app-url";
 import type { ActionResult, CreatePreferenceInput } from "@/types";
 
 /**
@@ -66,7 +67,7 @@ export async function createPreference(
     const mpClient = getMPClient(tenant.mp_access_token);
     const preference = new Preference(mpClient);
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const appUrl = getAppUrl();
 
     const result = await preference.create({
       body: {

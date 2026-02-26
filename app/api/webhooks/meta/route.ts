@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { processMessage } from "@/lib/ai-service";
 import { checkAIRateLimit } from "@/lib/rate-limit";
 import { getAdapter } from "@/lib/channel-adapters";
+import { notifyOwnerOnFirstExternalMessage } from "@/lib/owner-alerts";
 import type { BotRequest, SocialChannel, ChatChannel } from "@/types";
 
 /**
@@ -136,6 +137,13 @@ async function processAndReply(
   senderId: string,
   message: string
 ) {
+  await notifyOwnerOnFirstExternalMessage({
+    tenantId: channel.tenant_id,
+    channel: channelType,
+    senderId,
+    message,
+  });
+
   const rateLimit = checkAIRateLimit(channel.tenant_id);
   if (!rateLimit.allowed) {
     const adapter = getAdapter(channelType);

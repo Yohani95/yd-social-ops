@@ -2,6 +2,7 @@
 
 import { getAuthenticatedContext } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { getAppUrl } from "@/lib/app-url";
 import type { ActionResult, SocialChannel, ChatChannel } from "@/types";
 
 export async function getChannels(): Promise<SocialChannel[]> {
@@ -51,7 +52,7 @@ export async function createChannel(params: {
     }
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const appUrl = getAppUrl();
   const webhookUrl = `${appUrl}/api/channels/webhook/${ctx.tenantId}`;
 
   const config: Record<string, unknown> = {};

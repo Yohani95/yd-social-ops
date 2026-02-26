@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { processMessage } from "@/lib/ai-service";
 import { checkAIRateLimit } from "@/lib/rate-limit";
 import { getAdapter } from "@/lib/channel-adapters";
+import { notifyOwnerOnFirstExternalMessage } from "@/lib/owner-alerts";
 import type { BotRequest, SocialChannel } from "@/types";
 
 /**
@@ -40,6 +41,13 @@ export async function POST(request: NextRequest) {
       (ch) => ch.provider_config?.open_id === parsed.senderId
         || ch.channel_identifier === parsed.senderId
     ) || channels[0] as SocialChannel;
+
+    await notifyOwnerOnFirstExternalMessage({
+      tenantId: channel.tenant_id,
+      channel: "tiktok",
+      senderId: parsed.senderId,
+      message: parsed.message,
+    });
 
     const rateLimit = checkAIRateLimit(channel.tenant_id);
     if (!rateLimit.allowed) {

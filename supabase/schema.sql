@@ -332,3 +332,200 @@ GROUP BY tenant_id, DATE_TRUNC('day', created_at);
 -- ============================================================
 -- FIN DEL SCHEMA
 -- ============================================================
+
+-- ============================================================
+-- PATCH 2026-02-26: CRM base + services fields
+-- (Mantener sincronizado con supabase/migrations/20260226_crm_base.sql)
+-- ============================================================
+
+ALTER TABLE products
+  ADD COLUMN IF NOT EXISTS unit_label TEXT DEFAULT 'unidad',
+  ADD COLUMN IF NOT EXISTS availability_type TEXT DEFAULT 'stock',
+  ADD COLUMN IF NOT EXISTS min_quantity INT DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS max_quantity INT DEFAULT 99;
+
+CREATE TABLE IF NOT EXISTS contacts (
+  id            UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  channel       TEXT NOT NULL CHECK (channel IN ('web', 'whatsapp', 'messenger', 'instagram', 'tiktok')),
+  identifier    TEXT NOT NULL,
+  name          TEXT,
+  email         TEXT,
+  phone         TEXT,
+  tags          TEXT[] DEFAULT '{}',
+  notes         TEXT,
+  metadata      JSONB DEFAULT '{}',
+  last_seen_at  TIMESTAMPTZ DEFAULT NOW(),
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(tenant_id, channel, identifier)
+);
+
+CREATE TABLE IF NOT EXISTS conversation_memory (
+  id            UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  session_id    TEXT NOT NULL,
+  contact_id    UUID REFERENCES contacts(id) ON DELETE SET NULL,
+  messages      JSONB NOT NULL DEFAULT '[]',
+  context       JSONB NOT NULL DEFAULT '{}',
+  expires_at    TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '24 hours'),
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(tenant_id, session_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_contacts_tenant      ON contacts(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_contacts_identifier  ON contacts(tenant_id, identifier);
+CREATE INDEX IF NOT EXISTS idx_contacts_last_seen   ON contacts(tenant_id, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_session       ON conversation_memory(tenant_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_memory_expires       ON conversation_memory(expires_at);
+
+ALTER TABLE contacts            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_memory ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS contacts_tenant ON contacts;
+CREATE POLICY contacts_tenant
+  ON contacts FOR ALL
+  USING (tenant_id = get_my_tenant_id())
+  WITH CHECK (tenant_id = get_my_tenant_id());
+
+DROP POLICY IF EXISTS conversation_memory_tenant ON conversation_memory;
+CREATE POLICY conversation_memory_tenant
+  ON conversation_memory FOR ALL
+  USING (tenant_id = get_my_tenant_id())
+  WITH CHECK (tenant_id = get_my_tenant_id());
+
+CREATE OR REPLACE TRIGGER set_contacts_updated_at
+  BEFORE UPDATE ON contacts
+  FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+CREATE OR REPLACE TRIGGER set_conversation_memory_updated_at
+  BEFORE UPDATE ON conversation_memory
+  FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+-- ============================================================
+-- PATCH 2026-02-26: Payment events (webhook idempotency)
+-- (Mantener sincronizado con supabase/migrations/20260226_payment_events.sql)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS payment_events (
+  id            UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  payment_id    TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'unknown',
+  product_id    UUID REFERENCES products(id) ON DELETE SET NULL,
+  quantity      INT NOT NULL DEFAULT 1,
+  payer_email   TEXT,
+  amount        NUMERIC(12, 2) DEFAULT 0,
+  currency      TEXT DEFAULT 'CLP',
+  stock_updated BOOLEAN NOT NULL DEFAULT false,
+  email_sent    BOOLEAN NOT NULL DEFAULT false,
+  processed     BOOLEAN NOT NULL DEFAULT false,
+  processed_at  TIMESTAMPTZ,
+  raw_payload   JSONB NOT NULL DEFAULT '{}',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(tenant_id, payment_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_events_tenant ON payment_events(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_payment_events_processed ON payment_events(tenant_id, processed, created_at DESC);
+
+ALTER TABLE payment_events ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS payment_events_tenant ON payment_events;
+CREATE POLICY payment_events_tenant
+  ON payment_events FOR ALL
+  USING (tenant_id = get_my_tenant_id())
+  WITH CHECK (tenant_id = get_my_tenant_id());
+
+CREATE OR REPLACE TRIGGER set_payment_events_updated_at
+  BEFORE UPDATE ON payment_events
+  FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+-- ============================================================
+-- PATCH 2026-02-26: FK indexes for new tables
+-- (Mantener sincronizado con supabase/migrations/20260226_fk_indexes.sql)
+-- ============================================================
+
+CREATE INDEX IF NOT EXISTS idx_conversation_memory_contact_id
+  ON conversation_memory(contact_id);
+
+CREATE INDEX IF NOT EXISTS idx_payment_events_product_id
+  ON payment_events(product_id);
+
+-- ============================================================
+-- PATCH 2026-02-26: MCP servers
+-- (Mantener sincronizado con supabase/migrations/20260226_mcp_servers.sql)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS mcp_servers (
+  id          UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  url         TEXT NOT NULL,
+  auth_type   TEXT NOT NULL DEFAULT 'none' CHECK (auth_type IN ('none', 'bearer', 'api_key')),
+  auth_secret TEXT,
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_tenant ON mcp_servers(tenant_id, is_active);
+
+ALTER TABLE mcp_servers ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS mcp_servers_tenant ON mcp_servers;
+CREATE POLICY mcp_servers_tenant
+  ON mcp_servers FOR ALL
+  USING (tenant_id = get_my_tenant_id())
+  WITH CHECK (tenant_id = get_my_tenant_id());
+
+CREATE OR REPLACE TRIGGER set_mcp_servers_updated_at
+  BEFORE UPDATE ON mcp_servers
+  FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+-- ============================================================
+-- PATCH 2026-02-26: Tenant integrations (Resend / n8n)
+-- (Mantener sincronizado con supabase/migrations/20260226_tenant_integrations.sql)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS tenant_integrations (
+  id          UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  provider    TEXT NOT NULL CHECK (provider IN ('resend', 'n8n')),
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  config      JSONB NOT NULL DEFAULT '{}',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tenant_id, provider)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_integrations_tenant
+  ON tenant_integrations(tenant_id, provider, is_active);
+
+ALTER TABLE tenant_integrations ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_integrations_tenant ON tenant_integrations;
+CREATE POLICY tenant_integrations_tenant
+  ON tenant_integrations FOR ALL
+  USING (tenant_id = get_my_tenant_id())
+  WITH CHECK (tenant_id = get_my_tenant_id());
+
+CREATE OR REPLACE TRIGGER set_tenant_integrations_updated_at
+  BEFORE UPDATE ON tenant_integrations
+  FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+-- ============================================================
+-- PATCH 2026-02-26: Tenant integrations providers smtp + gmail_oauth
+-- (Mantener sincronizado con:
+--  - supabase/migrations/20260226_tenant_integrations_smtp.sql
+--  - supabase/migrations/20260226_tenant_integrations_gmail_oauth.sql)
+-- ============================================================
+
+ALTER TABLE tenant_integrations
+  DROP CONSTRAINT IF EXISTS tenant_integrations_provider_check;
+
+ALTER TABLE tenant_integrations
+  ADD CONSTRAINT tenant_integrations_provider_check
+  CHECK (provider IN ('resend', 'n8n', 'smtp', 'gmail_oauth'));

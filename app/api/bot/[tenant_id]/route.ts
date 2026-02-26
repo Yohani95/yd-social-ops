@@ -66,6 +66,8 @@ export async function POST(
     return NextResponse.json({
       success: true,
       ...response,
+      // Compatibilidad temporal con clientes legacy del widget.
+      bot_response: response.message,
     });
   } catch (error) {
     console.error("[Bot API] Error:", error);

@@ -35,13 +35,36 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { updateBankDetails, updateTenant, disconnectMP } from "@/actions/tenant";
-import type { Tenant, BusinessType, ContactAction, BotTone } from "@/types";
+import {
+  getIntegrationSettings,
+  disconnectGmailIntegration,
+  saveN8nIntegration,
+  saveResendIntegration,
+  saveSmtpIntegration,
+} from "@/actions/integrations";
+import {
+  createMcpServer,
+  deleteMcpServer,
+  getMcpServers,
+  updateMcpServer,
+} from "@/actions/mcp-servers";
+import { normalizeBaseUrl } from "@/lib/app-url";
+import type {
+  Tenant,
+  BusinessType,
+  ContactAction,
+  BotTone,
+  McpAuthType,
+  McpServer,
+} from "@/types";
 
 interface SettingsClientProps {
   tenant: Tenant | null;
   userRole: string;
   mpSuccess?: boolean;
   mpError?: string;
+  gmailSuccess?: boolean;
+  gmailError?: string;
 }
 
 const mpErrorMessages: Record<string, string> = {
@@ -51,11 +74,25 @@ const mpErrorMessages: Record<string, string> = {
   db_error: "Error al guardar los tokens en la base de datos",
 };
 
+const gmailErrorMessages: Record<string, string> = {
+  missing_params: "Parametros incompletos en la respuesta de Google",
+  invalid_state: "Estado de autorizacion invalido",
+  unauthorized_state: "La sesion no coincide con el tenant autorizado",
+  config_missing: "Falta configurar GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET",
+  token_exchange_failed: "No se pudo obtener el token de Google",
+  userinfo_failed: "No se pudo leer el email de la cuenta Google",
+  no_refresh_token: "Google no devolvio refresh token (reintenta reconectar)",
+  db_error: "Error al guardar la integracion de Gmail",
+  access_denied: "Autorizacion cancelada por el usuario",
+};
+
 export function SettingsClient({
   tenant,
   userRole,
   mpSuccess,
   mpError,
+  gmailSuccess,
+  gmailError,
 }: SettingsClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -85,6 +122,43 @@ export function SettingsClient({
     white_label_domain: tenant?.white_label_domain || "",
     white_label_logo: tenant?.white_label_logo || "",
   });
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const [isMcpLoading, setIsMcpLoading] = useState(false);
+  const [mcpForm, setMcpForm] = useState({
+    name: "",
+    url: "",
+    auth_type: "none" as McpAuthType,
+    auth_secret: "",
+  });
+  const [isIntegrationsLoading, setIsIntegrationsLoading] = useState(false);
+  const [resendForm, setResendForm] = useState({
+    is_active: false,
+    from_email: "",
+    api_key: "",
+    has_api_key: false,
+  });
+  const [n8nForm, setN8nForm] = useState({
+    is_active: false,
+    webhook_url: "",
+    auth_header: "",
+    has_auth_header: false,
+  });
+  const [smtpForm, setSmtpForm] = useState({
+    is_active: false,
+    host: "",
+    port: 587,
+    secure: false,
+    user: "",
+    from_email: "",
+    password: "",
+    has_password: false,
+  });
+  const [gmailOAuthForm, setGmailOAuthForm] = useState({
+    is_active: false,
+    email: "",
+    has_refresh_token: false,
+  });
+  const [selectedConnector, setSelectedConnector] = useState<"gmail_oauth" | "smtp" | "resend" | "n8n" | null>(null);
 
   // Mostrar notificaciones de MP OAuth
   useEffect(() => {
@@ -96,18 +170,122 @@ export function SettingsClient({
       toast.error(mpErrorMessages[mpError] || `Error de MP: ${mpError}`);
       router.replace("/dashboard/settings");
     }
-  }, [mpSuccess, mpError, router]);
+    if (gmailSuccess) {
+      toast.success("Gmail conectado exitosamente");
+      router.replace("/dashboard/settings");
+    }
+    if (gmailError) {
+      toast.error(gmailErrorMessages[gmailError] || `Error de Gmail: ${gmailError}`);
+      router.replace("/dashboard/settings");
+    }
+  }, [mpSuccess, mpError, gmailSuccess, gmailError, router]);
 
   const isOwner = userRole === "owner";
   const plan = tenant?.plan_tier || "basic";
   const isMPConnected = !!tenant?.mp_user_id;
 
+  async function loadMcpServers() {
+    if (plan !== "enterprise") return;
+    setIsMcpLoading(true);
+    try {
+      const items = await getMcpServers();
+      setMcpServers(items || []);
+    } finally {
+      setIsMcpLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadMcpServers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, tenant?.id]);
+
+  async function loadTenantIntegrations() {
+    if (!tenant?.id) return;
+    setIsIntegrationsLoading(true);
+    try {
+      const settings = await getIntegrationSettings();
+      setResendForm((prev) => ({
+        ...prev,
+        is_active: settings.resend.is_active,
+        from_email: settings.resend.from_email || "",
+        api_key: "",
+        has_api_key: settings.resend.has_api_key,
+      }));
+      setN8nForm((prev) => ({
+        ...prev,
+        is_active: settings.n8n.is_active,
+        webhook_url: settings.n8n.webhook_url || "",
+        auth_header: "",
+        has_auth_header: settings.n8n.has_auth_header,
+      }));
+      setSmtpForm((prev) => ({
+        ...prev,
+        is_active: settings.smtp.is_active,
+        host: settings.smtp.host || "",
+        port: settings.smtp.port || 587,
+        secure: Boolean(settings.smtp.secure),
+        user: settings.smtp.user || "",
+        from_email: settings.smtp.from_email || "",
+        password: "",
+        has_password: settings.smtp.has_password,
+      }));
+      setGmailOAuthForm((prev) => ({
+        ...prev,
+        is_active: settings.gmail_oauth.is_active,
+        email: settings.gmail_oauth.email || "",
+        has_refresh_token: settings.gmail_oauth.has_refresh_token,
+      }));
+    } finally {
+      setIsIntegrationsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadTenantIntegrations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenant?.id]);
+
+  function encodeBase64Url(value: string): string {
+    if (typeof window === "undefined") return value;
+    const bytes = new TextEncoder().encode(value);
+    let binary = "";
+    for (const byte of bytes) {
+      binary += String.fromCharCode(byte);
+    }
+    return window
+      .btoa(binary)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+  }
+
+  function generateNonce(size = 24): string {
+    if (typeof window === "undefined") return "nonce";
+    const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const random = new Uint8Array(size);
+    window.crypto.getRandomValues(random);
+    let out = "";
+    for (let i = 0; i < random.length; i += 1) out += alphabet[random[i] % alphabet.length];
+    return out;
+  }
+
+  function setOAuthNonceCookie(name: string, nonce: string) {
+    if (typeof window === "undefined") return;
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${name}=${nonce}; Max-Age=900; Path=/; SameSite=Lax${secure}`;
+  }
+
   function handleConnectMP() {
     if (!tenant?.id) return;
     // El tenant_id se pasa como state en base64url
-    const state = Buffer.from(JSON.stringify({ tenant_id: tenant.id })).toString("base64url");
+    const nonce = generateNonce();
+    setOAuthNonceCookie("yd_oauth_nonce_mp", nonce);
+    const state = encodeBase64Url(
+      JSON.stringify({ tenant_id: tenant.id, nonce, ts: Date.now() })
+    );
     const clientId = process.env.NEXT_PUBLIC_MP_CLIENT_ID || "";
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+    const appUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_APP_URL || window.location.origin);
     const redirectUri = `${appUrl}/api/auth/mercadopago/callback`;
 
     const params = new URLSearchParams({
@@ -119,6 +297,48 @@ export function SettingsClient({
     });
 
     window.location.href = `https://auth.mercadopago.cl/authorization?${params.toString()}`;
+  }
+
+  function handleConnectGmail() {
+    if (!tenant?.id) return;
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
+    if (!clientId) {
+      toast.error("Falta NEXT_PUBLIC_GOOGLE_CLIENT_ID en el entorno");
+      return;
+    }
+
+    const nonce = generateNonce();
+    setOAuthNonceCookie("yd_oauth_nonce_gmail", nonce);
+    const state = encodeBase64Url(
+      JSON.stringify({ tenant_id: tenant.id, nonce, ts: Date.now() })
+    );
+    const appUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_APP_URL || window.location.origin);
+    const redirectUri = `${appUrl}/api/auth/google/callback`;
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      access_type: "offline",
+      prompt: "consent",
+      scope: "openid email profile https://mail.google.com/",
+      state,
+    });
+
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  }
+
+  function handleDisconnectGmail() {
+    if (!isOwner) return;
+    startTransition(async () => {
+      const result = await disconnectGmailIntegration();
+      if (!result.success) {
+        toast.error(result.error || "No se pudo desconectar Gmail");
+        return;
+      }
+      toast.success("Gmail desconectado");
+      await loadTenantIntegrations();
+    });
   }
 
   function saveGeneral() {
@@ -165,6 +385,120 @@ export function SettingsClient({
     });
   }
 
+  function createEnterpriseMcpServer() {
+    if (!isOwner) return;
+
+    startTransition(async () => {
+      const result = await createMcpServer({
+        name: mcpForm.name,
+        url: mcpForm.url,
+        auth_type: mcpForm.auth_type,
+        auth_secret: mcpForm.auth_type === "none" ? "" : mcpForm.auth_secret,
+      });
+
+      if (!result.success) {
+        toast.error(result.error || "No se pudo crear el servidor MCP");
+        return;
+      }
+
+      toast.success("Servidor MCP creado");
+      setMcpForm({ name: "", url: "", auth_type: "none", auth_secret: "" });
+      await loadMcpServers();
+    });
+  }
+
+  function toggleMcpServer(server: McpServer) {
+    if (!isOwner) return;
+    startTransition(async () => {
+      const result = await updateMcpServer(server.id, {
+        is_active: !server.is_active,
+      });
+
+      if (!result.success) {
+        toast.error(result.error || "No se pudo actualizar");
+        return;
+      }
+
+      toast.success(server.is_active ? "Servidor desactivado" : "Servidor activado");
+      await loadMcpServers();
+    });
+  }
+
+  function removeMcpServer(server: McpServer) {
+    if (!isOwner) return;
+    startTransition(async () => {
+      const result = await deleteMcpServer(server.id);
+      if (!result.success) {
+        toast.error(result.error || "No se pudo eliminar");
+        return;
+      }
+
+      toast.success("Servidor MCP eliminado");
+      await loadMcpServers();
+    });
+  }
+
+  function saveResendSettings() {
+    if (!isOwner) return;
+    startTransition(async () => {
+      const result = await saveResendIntegration({
+        is_active: resendForm.is_active,
+        from_email: resendForm.from_email,
+        api_key: resendForm.api_key || undefined,
+      });
+
+      if (!result.success) {
+        toast.error(result.error || "No se pudo guardar Resend");
+        return;
+      }
+
+      toast.success("Integracion Resend guardada");
+      await loadTenantIntegrations();
+    });
+  }
+
+  function saveN8nSettings() {
+    if (!isOwner) return;
+    startTransition(async () => {
+      const result = await saveN8nIntegration({
+        is_active: n8nForm.is_active,
+        webhook_url: n8nForm.webhook_url,
+        auth_header: n8nForm.auth_header || undefined,
+      });
+
+      if (!result.success) {
+        toast.error(result.error || "No se pudo guardar n8n");
+        return;
+      }
+
+      toast.success("Integracion n8n guardada");
+      await loadTenantIntegrations();
+    });
+  }
+
+  function saveSmtpSettings() {
+    if (!isOwner) return;
+    startTransition(async () => {
+      const result = await saveSmtpIntegration({
+        is_active: smtpForm.is_active,
+        host: smtpForm.host,
+        port: smtpForm.port,
+        secure: smtpForm.secure,
+        user: smtpForm.user,
+        from_email: smtpForm.from_email,
+        password: smtpForm.password || undefined,
+      });
+
+      if (!result.success) {
+        toast.error(result.error || "No se pudo guardar SMTP");
+        return;
+      }
+
+      toast.success("Integracion SMTP guardada");
+      await loadTenantIntegrations();
+    });
+  }
+
   return (
     <div className="space-y-6 max-w-3xl">
       {/* Header */}
@@ -179,8 +513,9 @@ export function SettingsClient({
       </div>
 
       <Tabs defaultValue="general">
-        <TabsList className="grid w-full grid-cols-2 lg:grid-cols-3 lg:w-auto lg:grid-cols-none lg:inline-flex">
+        <TabsList className="inline-flex w-full flex-wrap">
           <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="integrations">Integraciones</TabsTrigger>
           <TabsTrigger value="payments">Pagos</TabsTrigger>
           {plan === "enterprise" && (
             <TabsTrigger value="enterprise">Enterprise</TabsTrigger>
@@ -543,6 +878,399 @@ export function SettingsClient({
           </Card>
         </TabsContent>
 
+        {/* === TAB: INTEGRACIONES === */}
+        <TabsContent value="integrations" className="space-y-4 mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Globe className="w-4 h-4" />
+                Marketplace de Integraciones
+              </CardTitle>
+              <CardDescription>
+                Elige una integración y conecta en pocos pasos.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="rounded-md border p-3 space-y-3">
+                <div>
+                  <p className="text-sm font-medium">Meta (OAuth)</p>
+                  <p className="text-xs text-muted-foreground">WhatsApp, Messenger, Instagram</p>
+                </div>
+                <Badge variant="outline">OAuth</Badge>
+                <Button className="w-full" variant="outline" onClick={() => router.push("/dashboard/channels")}>
+                  Conectar
+                </Button>
+              </div>
+
+              <div className="rounded-md border p-3 space-y-3">
+                <div>
+                  <p className="text-sm font-medium">Mercado Pago (OAuth)</p>
+                  <p className="text-xs text-muted-foreground">
+                    Estado: {isMPConnected ? "Conectado" : "No conectado"}
+                  </p>
+                </div>
+                <Badge variant={isMPConnected ? "success" : "outline"}>
+                  {isMPConnected ? "Conectado" : "Pendiente"}
+                </Badge>
+                <Button className="w-full" onClick={handleConnectMP} disabled={!isOwner || isPending}>
+                  {isMPConnected ? "Reconectar" : "Conectar"}
+                </Button>
+              </div>
+
+              <div className="rounded-md border p-3 space-y-3">
+                <div>
+                  <p className="text-sm font-medium">Gmail (OAuth)</p>
+                  <p className="text-xs text-muted-foreground">
+                    {gmailOAuthForm.email
+                      ? `Cuenta: ${gmailOAuthForm.email}`
+                      : "Conecta Gmail sin configurar puerto ni SMTP"}
+                  </p>
+                </div>
+                <Badge variant={gmailOAuthForm.is_active ? "success" : "outline"}>
+                  {gmailOAuthForm.is_active ? "Conectado" : "No conectado"}
+                </Badge>
+                <Button className="w-full" onClick={handleConnectGmail} disabled={!isOwner || isPending}>
+                  {gmailOAuthForm.is_active ? "Reconectar" : "Conectar"}
+                </Button>
+                {gmailOAuthForm.is_active && (
+                  <Button
+                    className="w-full"
+                    variant="outline"
+                    onClick={() => setSelectedConnector("gmail_oauth")}
+                  >
+                    Administrar
+                  </Button>
+                )}
+              </div>
+
+              <div className="rounded-md border p-3 space-y-3">
+                <div>
+                  <p className="text-sm font-medium">Email SMTP</p>
+                  <p className="text-xs text-muted-foreground">Gmail, Outlook o servidor propio</p>
+                </div>
+                <Badge variant={smtpForm.is_active ? "success" : "outline"}>
+                  {smtpForm.is_active ? "Activo" : "No configurado"}
+                </Badge>
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  onClick={() => setSelectedConnector("smtp")}
+                >
+                  {smtpForm.is_active ? "Editar" : "Configurar"}
+                </Button>
+              </div>
+
+              <div className="rounded-md border p-3 space-y-3">
+                <div>
+                  <p className="text-sm font-medium">Resend</p>
+                  <p className="text-xs text-muted-foreground">Proveedor transaccional de email</p>
+                </div>
+                <Badge variant={resendForm.is_active ? "success" : "outline"}>
+                  {resendForm.is_active ? "Activo" : "No configurado"}
+                </Badge>
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  onClick={() => setSelectedConnector("resend")}
+                >
+                  {resendForm.is_active ? "Editar" : "Configurar"}
+                </Button>
+              </div>
+
+              <div className="rounded-md border p-3 space-y-3 sm:col-span-2">
+                <div>
+                  <p className="text-sm font-medium">n8n Webhook</p>
+                  <p className="text-xs text-muted-foreground">Automatizaciones externas por tenant</p>
+                </div>
+                <Badge variant={n8nForm.is_active ? "success" : "outline"}>
+                  {n8nForm.is_active ? "Activo" : "No configurado"}
+                </Badge>
+                <Button
+                  className="w-full sm:w-auto"
+                  variant="outline"
+                  onClick={() => setSelectedConnector("n8n")}
+                >
+                  {n8nForm.is_active ? "Editar" : "Configurar"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <MessageCircle className="w-4 h-4" />
+                Configuración del Conector
+              </CardTitle>
+              <CardDescription>
+                Selecciona un conector en el marketplace y guarda los datos para este tenant.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {isIntegrationsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Cargando integraciones del tenant...
+                </div>
+              ) : (
+                <>
+                  {(selectedConnector === "gmail_oauth" || (!selectedConnector && gmailOAuthForm.is_active)) && (
+                    <div className="space-y-3 rounded-md border p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium">Gmail (OAuth)</p>
+                        <Badge variant={gmailOAuthForm.is_active ? "success" : "outline"}>
+                          {gmailOAuthForm.is_active ? "Conectado" : "No conectado"}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {gmailOAuthForm.email
+                          ? `Conectado como ${gmailOAuthForm.email}`
+                          : "Sin cuenta conectada"}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button onClick={handleConnectGmail} disabled={!isOwner || isPending}>
+                          {gmailOAuthForm.is_active ? "Reconectar Gmail" : "Conectar Gmail"}
+                        </Button>
+                        {gmailOAuthForm.is_active && (
+                          <Button
+                            variant="outline"
+                            onClick={handleDisconnectGmail}
+                            disabled={!isOwner || isPending}
+                          >
+                            Desconectar
+                          </Button>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Recomendado para dueÃ±os: conexiÃ³n simple OAuth, sin host/puerto manual.
+                      </p>
+                    </div>
+                  )}
+
+                  {(selectedConnector === "smtp" || (!selectedConnector && smtpForm.is_active)) && (
+                    <div className="space-y-3 rounded-md border p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium">SMTP</p>
+                        <label className="text-xs flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={smtpForm.is_active}
+                            onChange={(e) =>
+                              setSmtpForm((prev) => ({ ...prev, is_active: e.target.checked }))
+                            }
+                            disabled={!isOwner}
+                          />
+                          Activo
+                        </label>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="smtp_host">Host</Label>
+                          <Input
+                            id="smtp_host"
+                            value={smtpForm.host}
+                            onChange={(e) =>
+                              setSmtpForm((prev) => ({ ...prev, host: e.target.value }))
+                            }
+                            placeholder="smtp.gmail.com"
+                            disabled={!isOwner}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="smtp_port">Puerto</Label>
+                          <Input
+                            id="smtp_port"
+                            type="number"
+                            value={String(smtpForm.port)}
+                            onChange={(e) =>
+                              setSmtpForm((prev) => ({
+                                ...prev,
+                                port: Number(e.target.value || 587),
+                              }))
+                            }
+                            placeholder="587"
+                            disabled={!isOwner}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="smtp_user">Usuario SMTP</Label>
+                          <Input
+                            id="smtp_user"
+                            value={smtpForm.user}
+                            onChange={(e) =>
+                              setSmtpForm((prev) => ({ ...prev, user: e.target.value }))
+                            }
+                            placeholder="usuario@dominio.com"
+                            disabled={!isOwner}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="smtp_from">From Email</Label>
+                          <Input
+                            id="smtp_from"
+                            value={smtpForm.from_email}
+                            onChange={(e) =>
+                              setSmtpForm((prev) => ({ ...prev, from_email: e.target.value }))
+                            }
+                            placeholder="noreply@dominio.com"
+                            disabled={!isOwner}
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="smtp_password">Password / App Password</Label>
+                        <Input
+                          id="smtp_password"
+                          type="password"
+                          value={smtpForm.password}
+                          onChange={(e) =>
+                            setSmtpForm((prev) => ({ ...prev, password: e.target.value }))
+                          }
+                          placeholder={smtpForm.has_password ? "******** (configurada)" : "Ingresa password"}
+                          disabled={!isOwner}
+                        />
+                      </div>
+                      <label className="text-xs flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={smtpForm.secure}
+                          onChange={(e) =>
+                            setSmtpForm((prev) => ({ ...prev, secure: e.target.checked }))
+                          }
+                          disabled={!isOwner}
+                        />
+                        Usar TLS/SSL (`secure=true`, típico puerto 465)
+                      </label>
+                      {isOwner && (
+                        <Button onClick={saveSmtpSettings} disabled={isPending}>
+                          Guardar SMTP
+                        </Button>
+                      )}
+                    </div>
+                  )}
+
+                  {(selectedConnector === "resend" || (!selectedConnector && resendForm.is_active)) && (
+                    <div className="space-y-3 rounded-md border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium">Resend (Email)</p>
+                      <label className="text-xs flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={resendForm.is_active}
+                          onChange={(e) =>
+                            setResendForm((prev) => ({ ...prev, is_active: e.target.checked }))
+                          }
+                          disabled={!isOwner}
+                        />
+                        Activo
+                      </label>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="resend_from">Email remitente</Label>
+                      <Input
+                        id="resend_from"
+                        value={resendForm.from_email}
+                        onChange={(e) =>
+                          setResendForm((prev) => ({ ...prev, from_email: e.target.value }))
+                        }
+                        placeholder="noreply@tu-dominio.com"
+                        disabled={!isOwner}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="resend_api_key">API Key</Label>
+                      <Input
+                        id="resend_api_key"
+                        type="password"
+                        value={resendForm.api_key}
+                        onChange={(e) =>
+                          setResendForm((prev) => ({ ...prev, api_key: e.target.value }))
+                        }
+                        placeholder={resendForm.has_api_key ? "******** (configurada)" : "re_xxx..."}
+                        disabled={!isOwner}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Se almacena cifrada. Deja vacio para mantener la clave actual.
+                      </p>
+                    </div>
+                    {isOwner && (
+                      <Button onClick={saveResendSettings} disabled={isPending}>
+                        Guardar Resend
+                      </Button>
+                    )}
+                    </div>
+                  )}
+
+                  {(selectedConnector === "n8n" || (!selectedConnector && n8nForm.is_active)) && (
+                    <div className="space-y-3 rounded-md border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium">n8n Webhook</p>
+                      <label className="text-xs flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={n8nForm.is_active}
+                          onChange={(e) =>
+                            setN8nForm((prev) => ({ ...prev, is_active: e.target.checked }))
+                          }
+                          disabled={!isOwner}
+                        />
+                        Activo
+                      </label>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="n8n_webhook">Webhook URL</Label>
+                      <Input
+                        id="n8n_webhook"
+                        value={n8nForm.webhook_url}
+                        onChange={(e) =>
+                          setN8nForm((prev) => ({ ...prev, webhook_url: e.target.value }))
+                        }
+                        placeholder="https://tu-n8n.com/webhook/yd-social-ops"
+                        disabled={!isOwner}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="n8n_auth_header">Authorization Header (opcional)</Label>
+                      <Input
+                        id="n8n_auth_header"
+                        type="password"
+                        value={n8nForm.auth_header}
+                        onChange={(e) =>
+                          setN8nForm((prev) => ({ ...prev, auth_header: e.target.value }))
+                        }
+                        placeholder={n8nForm.has_auth_header ? "******** (configurado)" : "Bearer xxx"}
+                        disabled={!isOwner}
+                      />
+                    </div>
+                    {isOwner && (
+                      <Button onClick={saveN8nSettings} disabled={isPending}>
+                        Guardar n8n
+                      </Button>
+                    )}
+                    </div>
+                  )}
+
+                  {!selectedConnector &&
+                    !gmailOAuthForm.is_active &&
+                    !smtpForm.is_active &&
+                    !resendForm.is_active &&
+                    !n8nForm.is_active && (
+                      <p className="text-sm text-muted-foreground">
+                        Selecciona una integración arriba para comenzar.
+                      </p>
+                    )}
+
+                  <p className="text-xs text-muted-foreground">
+                    `.env.local` queda solo para secretos globales de la plataforma (ej: `CRON_SECRET`).
+                  </p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* === TAB: PAGOS === */}
         <TabsContent value="payments" className="space-y-4 mt-4">
           {/* Plan Básico: Datos bancarios */}
@@ -748,6 +1476,146 @@ export function SettingsClient({
                     Guardar configuración Enterprise
                   </Button>
                 )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <MessageCircle className="w-4 h-4" />
+                  Integraciones Avanzadas (MCP)
+                </CardTitle>
+                <CardDescription>
+                  Solo para equipos tecnicos. Si buscas simplicidad, usa primero Integraciones OAuth.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="mcp_name">Nombre</Label>
+                    <Input
+                      id="mcp_name"
+                      value={mcpForm.name}
+                      onChange={(e) =>
+                        setMcpForm((prev) => ({ ...prev, name: e.target.value }))
+                      }
+                      placeholder="Google Sheets MCP"
+                      disabled={!isOwner}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="mcp_url">URL</Label>
+                    <Input
+                      id="mcp_url"
+                      value={mcpForm.url}
+                      onChange={(e) =>
+                        setMcpForm((prev) => ({ ...prev, url: e.target.value }))
+                      }
+                      placeholder="https://mcp.tu-dominio.com"
+                      disabled={!isOwner}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="mcp_auth_type">Autenticacion</Label>
+                    <select
+                      id="mcp_auth_type"
+                      value={mcpForm.auth_type}
+                      onChange={(e) =>
+                        setMcpForm((prev) => ({
+                          ...prev,
+                          auth_type: e.target.value as McpAuthType,
+                        }))
+                      }
+                      disabled={!isOwner}
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="none">Sin auth</option>
+                      <option value="bearer">Bearer token</option>
+                      <option value="api_key">API Key</option>
+                    </select>
+                  </div>
+
+                  {mcpForm.auth_type !== "none" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="mcp_auth_secret">Secreto</Label>
+                      <Input
+                        id="mcp_auth_secret"
+                        type="password"
+                        value={mcpForm.auth_secret}
+                        onChange={(e) =>
+                          setMcpForm((prev) => ({ ...prev, auth_secret: e.target.value }))
+                        }
+                        placeholder="Ingresa el secreto"
+                        disabled={!isOwner}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {isOwner && (
+                  <Button onClick={createEnterpriseMcpServer} disabled={isPending}>
+                    {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    Agregar servidor MCP
+                  </Button>
+                )}
+
+                <Separator />
+
+                <div className="space-y-2">
+                  {isMcpLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Cargando servidores MCP...
+                    </div>
+                  ) : mcpServers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No hay servidores MCP configurados para este tenant.
+                    </p>
+                  ) : (
+                    mcpServers.map((server) => (
+                      <div
+                        key={server.id}
+                        className="rounded-md border p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div>
+                          <p className="text-sm font-medium">{server.name}</p>
+                          <p className="text-xs text-muted-foreground break-all">
+                            {server.url}
+                          </p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline">{server.auth_type}</Badge>
+                            <Badge variant={server.is_active ? "success" : "secondary"}>
+                              {server.is_active ? "Activo" : "Inactivo"}
+                            </Badge>
+                          </div>
+                        </div>
+                        {isOwner && (
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => toggleMcpServer(server)}
+                              disabled={isPending}
+                            >
+                              {server.is_active ? "Desactivar" : "Activar"}
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => removeMcpServer(server)}
+                              disabled={isPending}
+                            >
+                              Eliminar
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
               </CardContent>
             </Card>
 

@@ -14,6 +14,8 @@ export default function SettingsPage() {
       userRole={userRole}
       mpSuccess={searchParams.get("mp_success") === "true"}
       mpError={searchParams.get("mp_error") || undefined}
+      gmailSuccess={searchParams.get("gmail_success") === "true"}
+      gmailError={searchParams.get("gmail_error") || undefined}
     />
   );
 }

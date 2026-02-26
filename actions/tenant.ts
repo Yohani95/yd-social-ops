@@ -99,11 +99,13 @@ export async function updatePlan(
 ): Promise<ActionResult> {
   const ctx = await getAuthenticatedContext();
   if (!ctx) return { success: false, error: "No autenticado" };
+  if (ctx.userRole !== "owner") return { success: false, error: "Sin permisos" };
+  if (tenantId !== ctx.tenantId) return { success: false, error: "Tenant invalido" };
 
   const { error } = await ctx.supabase
     .from("tenants")
     .update({ plan_tier: planTier })
-    .eq("id", tenantId);
+    .eq("id", ctx.tenantId);
 
   if (error) return { success: false, error: error.message };
 

@@ -113,7 +113,7 @@
       body: JSON.stringify({ message: text, session_id: sessionId, channel: "web" })
     }).then(function (r) { return r.json(); }).then(function (data) {
       if (typing.parentNode) typing.parentNode.removeChild(typing);
-      messages.push({ role: "bot", text: data.bot_response || data.error || "Sin respuesta" });
+      messages.push({ role: "bot", text: data.message || data.bot_response || data.error || "Sin respuesta" });
       if (data.payment_link) messages.push({ role: "bot", text: "💳 Link de pago: " + data.payment_link });
       renderMessages();
     }).catch(function () {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { processMessage } from "@/lib/ai-service";
 import { checkAIRateLimit } from "@/lib/rate-limit";
+import { notifyOwnerOnFirstExternalMessage } from "@/lib/owner-alerts";
 import type { BotRequest, ChatChannel } from "@/types";
 
 /**
@@ -65,12 +66,22 @@ export async function POST(
       );
     }
 
+    const channelType = channel as ChatChannel;
+    if (sender_id && channelType !== "web") {
+      await notifyOwnerOnFirstExternalMessage({
+        tenantId: tenant_id,
+        channel: channelType,
+        senderId: String(sender_id),
+        message: message.trim(),
+      });
+    }
+
     const botRequest: BotRequest = {
       tenant_id,
       user_message: message.trim(),
       session_id: `${channel}_${sender_id || "unknown"}`,
       user_identifier: sender_id || undefined,
-      channel: channel as ChatChannel,
+      channel: channelType,
     };
 
     const response = await processMessage(botRequest);

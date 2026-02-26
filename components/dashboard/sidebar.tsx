@@ -8,11 +8,13 @@ import {
   Package,
   Settings,
   MessageSquare,
+  Users,
   Share2,
   Crown,
   ChevronRight,
   Zap,
   Play,
+  Wand2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -30,8 +32,10 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Setup", href: "/dashboard/setup", icon: Wand2, badge: "Nuevo" },
   { label: "Productos", href: "/dashboard/products", icon: Package },
   { label: "Chat Logs", href: "/dashboard/chat-logs", icon: MessageSquare },
+  { label: "Contactos", href: "/dashboard/contacts", icon: Users },
   {
     label: "Canales",
     href: "/dashboard/channels",

@@ -1,60 +1,112 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { exchangeMPCode } from "@/lib/mercadopago";
 import { encrypt } from "@/lib/encryption";
+import { getAppUrl } from "@/lib/app-url";
+
+const MP_OAUTH_NONCE_COOKIE = "yd_oauth_nonce_mp";
+const OAUTH_STATE_MAX_AGE_MS = 15 * 60 * 1000;
+
+function redirectWithMpCookieClear(url: string) {
+  const response = NextResponse.redirect(url);
+  response.cookies.set(MP_OAUTH_NONCE_COOKIE, "", {
+    path: "/",
+    maxAge: 0,
+    sameSite: "lax",
+  });
+  return response;
+}
 
 /**
  * GET /api/auth/mercadopago/callback
  *
  * Recibe el callback de Mercado Pago OAuth.
  * Intercambia el code por tokens y los guarda en la BD.
- *
- * Query params: code, state (base64url del tenant_id)
  */
 export async function GET(request: NextRequest) {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const appUrl = getAppUrl();
   const { searchParams } = request.nextUrl;
 
   const code = searchParams.get("code");
   const state = searchParams.get("state");
   const error = searchParams.get("error");
 
-  // Manejar errores de MP OAuth
   if (error) {
     console.error("[MP OAuth] Error recibido de MP:", error);
-    return NextResponse.redirect(
+    return redirectWithMpCookieClear(
       `${appUrl}/dashboard/settings?mp_error=${encodeURIComponent(error)}`
     );
   }
 
   if (!code || !state) {
-    return NextResponse.redirect(
+    return redirectWithMpCookieClear(
       `${appUrl}/dashboard/settings?mp_error=missing_params`
     );
   }
 
-  // Decodificar el state para obtener tenant_id
   let tenantId: string;
+  let stateNonce: string;
+  let stateTs: number;
   try {
     const decoded = JSON.parse(
       Buffer.from(state, "base64url").toString("utf8")
     );
     tenantId = decoded.tenant_id;
-
-    if (!tenantId) throw new Error("tenant_id no encontrado en state");
+    stateNonce = decoded.nonce;
+    stateTs = Number(decoded.ts || 0);
+    if (!tenantId) throw new Error("tenant_id missing in state");
   } catch {
-    return NextResponse.redirect(
+    return redirectWithMpCookieClear(
+      `${appUrl}/dashboard/settings?mp_error=invalid_state`
+    );
+  }
+
+  const cookieNonce = request.cookies.get(MP_OAUTH_NONCE_COOKIE)?.value;
+  const stateAge = Date.now() - stateTs;
+  const nonceValid =
+    typeof stateNonce === "string" &&
+    stateNonce.length >= 8 &&
+    cookieNonce === stateNonce;
+  const stateFresh =
+    Number.isFinite(stateAge) &&
+    stateAge >= 0 &&
+    stateAge <= OAUTH_STATE_MAX_AGE_MS;
+  if (!nonceValid || !stateFresh) {
+    return redirectWithMpCookieClear(
       `${appUrl}/dashboard/settings?mp_error=invalid_state`
     );
   }
 
   try {
-    // Intercambiar código por tokens
+    const authClient = await createClient();
+    const {
+      data: { user },
+    } = await authClient.auth.getUser();
+
+    if (!user) {
+      return redirectWithMpCookieClear(
+        `${appUrl}/dashboard/settings?mp_error=unauthorized_state`
+      );
+    }
+
+    const securityClient = createServiceClient();
+    const { data: membership } = await securityClient
+      .from("tenant_users")
+      .select("tenant_id")
+      .eq("user_id", user.id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (!membership) {
+      console.warn("[MP OAuth] unauthorized state. user=%s tenant=%s", user.id, tenantId);
+      return redirectWithMpCookieClear(
+        `${appUrl}/dashboard/settings?mp_error=unauthorized_state`
+      );
+    }
+
     const tokens = await exchangeMPCode(code);
 
-    // Cifrar y guardar tokens en Supabase con Service Role (bypass RLS)
     const supabase = createServiceClient();
-
     const { error: updateError } = await supabase
       .from("tenants")
       .update({
@@ -67,18 +119,17 @@ export async function GET(request: NextRequest) {
 
     if (updateError) {
       console.error("[MP OAuth] Error guardando tokens:", updateError);
-      return NextResponse.redirect(
+      return redirectWithMpCookieClear(
         `${appUrl}/dashboard/settings?mp_error=db_error`
       );
     }
 
-    // Redirigir con éxito
-    return NextResponse.redirect(
+    return redirectWithMpCookieClear(
       `${appUrl}/dashboard/settings?mp_success=true`
     );
   } catch (err) {
-    console.error("[MP OAuth] Error intercambiando código:", err);
-    return NextResponse.redirect(
+    console.error("[MP OAuth] Error intercambiando codigo:", err);
+    return redirectWithMpCookieClear(
       `${appUrl}/dashboard/settings?mp_error=token_exchange_failed`
     );
   }
