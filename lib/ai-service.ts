@@ -3,7 +3,9 @@ import { getMPClient, Preference } from "@/lib/mercadopago";
 import { getAppUrl } from "@/lib/app-url";
 import { notifyN8n } from "@/lib/integrations/n8n";
 import { callAI, callAIWithToolResult, type AIMessage, type AITool } from "@/lib/ai-providers";
-import { sendWelcomeEmail, sendOwnerNewMessageAlertEmail } from "@/lib/email";
+
+import { sendWelcomeEmail } from "@/lib/email";
+
 import type { BotRequest, BotResponse, CaptureContactPayload, Product, Tenant } from "@/types";
 
 type IndustryTemplate =

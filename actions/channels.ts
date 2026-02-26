@@ -232,7 +232,12 @@ export async function subscribeMetaWebhook(channelId: string): Promise<ActionRes
       console.error("Error al suscribir webhook:", result);
       return { success: false, error: result.error?.message || "Error desconocido en Meta" };
     }
+<<<<<<< Desarrollo
+  } catch (err: any) {
+    return { success: false, error: err.message };
+=======
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Error desconocido" };
+>>>>>>> main
   }
 }
