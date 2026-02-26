@@ -40,6 +40,8 @@ export interface AIResponse {
   toolCalls?: AIToolCall[];
   provider: "openai" | "gemini" | "groq";
   tokensUsed: number;
+  /** Modelo usado (ej. para Groq fallback, pasar el mismo en callAIWithToolResult) */
+  modelUsed?: string;
 }
 
 // ============================================================
@@ -123,14 +125,37 @@ async function callOpenAIWithToolResult(
 
 // ============================================================
 // PROVEEDOR: Groq (OpenAI-compatible, gratis en desarrollo)
+// Fallback entre modelos: si el principal falla (429), prueba con más cuota
 // ============================================================
 
-async function callGroq(
+/** Modelos Groq de respaldo cuando el principal alcanza cuota (429) */
+const GROQ_FALLBACK_MODELS = [
+  "llama-3.1-8b-instant",  // 14.4K RPD
+  "allam-2-7b",           // 7K RPD
+] as const;
+
+function getGroqModelsToTry(): string[] {
+  const primary = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+  const fallbacks = GROQ_FALLBACK_MODELS.filter((m) => m !== primary);
+  return [primary, ...fallbacks];
+}
+
+function isRateLimitError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes("429") ||
+    msg.includes("rate limit") ||
+    msg.includes("RESOURCE_EXHAUSTED") ||
+    msg.includes("quota")
+  );
+}
+
+async function callGroqWithModel(
   messages: AIMessage[],
+  model: string,
   tools?: AITool[]
 ): Promise<AIResponse> {
   const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
-  const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
   const groqMessages = messages.map((m) => ({
     role: m.role,
@@ -168,20 +193,46 @@ async function callGroq(
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     provider: "groq",
     tokensUsed: completion.usage?.total_tokens || 0,
+    modelUsed: model,
   };
+}
+
+async function callGroq(
+  messages: AIMessage[],
+  tools?: AITool[]
+): Promise<AIResponse> {
+  let lastError: unknown;
+  for (const model of getGroqModelsToTry()) {
+    try {
+      const result = await callGroqWithModel(messages, model, tools);
+      if (result.modelUsed) {
+        console.info(`[AI] Groq usando modelo: ${result.modelUsed}`);
+      }
+      return result;
+    } catch (err) {
+      lastError = err;
+      if (isRateLimitError(err)) {
+        console.warn(`[AI] Groq modelo ${model} sin cuota, probando siguiente...`);
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
 }
 
 async function callGroqWithToolResult(
   messages: AIMessage[],
   assistantMessage: Parameters<Groq["chat"]["completions"]["create"]>[0]["messages"][number],
   toolCallId: string,
-  toolResult: string
+  toolResult: string,
+  model?: string
 ): Promise<AIResponse> {
   const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
-  const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+  const modelToUse = model || process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
   const completion = await client.chat.completions.create({
-    model,
+    model: modelToUse,
     messages: [
       ...messages.map((m) => ({
         role: m.role as "system" | "user" | "assistant",
@@ -445,7 +496,8 @@ export async function callAIWithToolResult(
   toolCallId: string,
   toolName: string,
   toolResult: string,
-  originalAssistantMessage?: OpenAI.Chat.ChatCompletionMessage
+  originalAssistantMessage?: OpenAI.Chat.ChatCompletionMessage,
+  groqModelUsed?: string
 ): Promise<AIResponse> {
   if (provider === "openai" && originalAssistantMessage) {
     return callOpenAIWithToolResult(
@@ -463,7 +515,7 @@ export async function callAIWithToolResult(
         { id: toolCallId, type: "function" as const, function: { name: toolName, arguments: "{}" } },
       ],
     };
-    return callGroqWithToolResult(messages, assistantMessage, toolCallId, toolResult);
+    return callGroqWithToolResult(messages, assistantMessage, toolCallId, toolResult, groqModelUsed);
   }
   return callGeminiWithToolResult(messages, toolName, toolResult);
 }

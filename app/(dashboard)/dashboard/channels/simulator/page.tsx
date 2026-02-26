@@ -46,15 +46,30 @@ export default function SimulatorPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const style = CHANNEL_STYLES[channel] || CHANNEL_STYLES.web;
-  const sessionId = useRef(`sim_${Date.now()}`);
+
+  // session_id persistente por tenant: mismo ID al cambiar de canal y al recargar
+  const getOrCreateSessionId = (tid: string) => {
+    if (typeof window === "undefined") return `sim_${tid}_${Date.now()}`;
+    const key = `sim_session_${tid}`;
+    let id = sessionStorage.getItem(key);
+    if (!id) {
+      id = `sim_${tid}_${Date.now()}`;
+      sessionStorage.setItem(key, id);
+    }
+    return id;
+  };
+  const sessionIdRef = useRef<string>("");
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Nueva conversación solo al cambiar de tenant (no al cambiar de canal)
+  // session_id persistente: misma conversación al alternar Web/WhatsApp/Messenger
   useEffect(() => {
+    if (!tenantId) return;
     setMessages([]);
-    sessionId.current = `sim_${Date.now()}`;
+    sessionIdRef.current = getOrCreateSessionId(tenantId);
     if (tenant?.bot_welcome_message) {
       setMessages([{
         id: "welcome",
@@ -63,7 +78,19 @@ export default function SimulatorPage() {
         timestamp: new Date(),
       }]);
     }
-  }, [channel, tenant?.bot_welcome_message]);
+  }, [tenantId]);
+
+  // Si tenant carga después (async), añadir welcome cuando la sesión está vacía
+  useEffect(() => {
+    if (tenant?.bot_welcome_message && messages.length === 0) {
+      setMessages([{
+        id: "welcome",
+        role: "bot",
+        content: tenant.bot_welcome_message,
+        timestamp: new Date(),
+      }]);
+    }
+  }, [tenant?.bot_welcome_message]);
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -87,7 +114,7 @@ export default function SimulatorPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: userMsg.content,
-          session_id: sessionId.current,
+          session_id: sessionIdRef.current,
           user_identifier: `simulator_${channel}`,
           channel,
         }),

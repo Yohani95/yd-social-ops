@@ -1,0 +1,71 @@
+---
+description: Diseño mobile-first obligatorio para todas las interfaces
+alwaysApply: true
+---
+
+# Mobile-First Design
+
+Este proyecto debe seguir siempre un enfoque **mobile-first**. Diseña primero para móvil (320px+), luego mejora con breakpoints mayores.
+
+## Principios
+
+1. **Base = móvil**: Los estilos por defecto se aplican a pantallas pequeñas.
+2. **Progresive enhancement**: Usa `sm:`, `md:`, `lg:` para añadir complejidad en pantallas grandes.
+3. **Touch targets**: Mínimo 44x44px para elementos interactivos (botones, links, inputs).
+
+## Patrones Tailwind
+
+### Grids
+```tsx
+// ✅ Correcto: 1 columna en móvil, más en desktop
+grid-cols-1 sm:grid-cols-2 lg:grid-cols-4
+
+// ❌ Evitar: grid fijo desktop-first
+grid-cols-4
+```
+
+### Flexbox
+```tsx
+// ✅ Correcto: columna en móvil, fila en desktop
+flex flex-col sm:flex-row items-stretch sm:items-center
+
+// ✅ Con wrap para evitar overflow
+flex flex-wrap gap-2
+```
+
+### Padding y espaciado
+```tsx
+// ✅ Correcto: menos padding en móvil
+p-4 sm:p-6
+px-4 sm:px-6
+gap-3 sm:gap-4
+```
+
+### Contenedores
+```tsx
+// ✅ Correcto: ancho fluido y min-w-0 para evitar overflow
+w-full max-w-full min-w-0
+```
+
+### Dialogs y Sheets
+```tsx
+// ✅ Correcto: márgenes en móvil
+w-[calc(100%-2rem)] max-w-lg max-h-[90vh]
+```
+
+## Evitar
+
+- `w-64` (256px) fijo en contenedores principales en móvil
+- `px-6` sin variante móvil en layouts estrechos
+- `flex` sin `flex-wrap` cuando hay múltiples elementos que pueden desbordar
+- Alturas fijas excesivas en móvil (ej. `h-[450px]` → preferir `min-h-[300px] h-[50vh]`)
+
+## Breakpoints de referencia
+
+| Breakpoint | Ancho |
+|------------|-------|
+| default | 0px+ |
+| sm | 640px |
+| md | 768px |
+| lg | 1024px |
+| xl | 1280px |

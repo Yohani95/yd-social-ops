@@ -45,6 +45,7 @@ export interface Tenant {
   // Negocio
   business_type: BusinessType;
   business_description: string | null;
+  business_address: string | null;
   contact_action: ContactAction;
   contact_whatsapp: string | null;
   contact_email: string | null;
@@ -65,6 +66,7 @@ export type TenantUpdate = Partial<
     | "business_name"
     | "business_type"
     | "business_description"
+    | "business_address"
     | "contact_action"
     | "contact_whatsapp"
     | "contact_email"

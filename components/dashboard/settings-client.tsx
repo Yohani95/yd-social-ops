@@ -66,6 +66,7 @@ export function SettingsClient({
     business_name: tenant?.business_name || "",
     business_type: (tenant?.business_type || "products") as BusinessType,
     business_description: tenant?.business_description || "",
+    business_address: tenant?.business_address || "",
     contact_action: (tenant?.contact_action || "payment_link") as ContactAction,
     contact_whatsapp: tenant?.contact_whatsapp || "",
     contact_email: tenant?.contact_email || "",
@@ -263,6 +264,17 @@ export function SettingsClient({
                     rows={2}
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="business_address">Dirección del negocio (opcional)</Label>
+                  <Input
+                    id="business_address"
+                    value={generalForm.business_address}
+                    onChange={(e) => setGeneralForm((f) => ({ ...f, business_address: e.target.value }))}
+                    placeholder="Ej: Av. Principal 123, Santiago"
+                    disabled={!isOwner}
+                  />
+                  <p className="text-xs text-muted-foreground">El bot podrá compartir esta dirección cuando los clientes la soliciten.</p>
+                </div>
               </div>
 
               <Separator />
@@ -272,7 +284,17 @@ export function SettingsClient({
                 <h4 className="text-sm font-medium">Cuando un cliente quiere comprar/reservar/contratar</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {([
-                    { id: "payment_link" as const, label: "Link de pago", desc: "Genera link de Mercado Pago", icon: CreditCard },
+                    {
+                      id: "payment_link" as const,
+                      label: plan === "basic" ? "Datos de transferencia" : "Link de pago",
+                      desc:
+                        plan === "basic"
+                          ? "El bot entregará los datos bancarios configurados"
+                          : isMPConnected
+                            ? "Genera link de Mercado Pago automático"
+                            : "Usa datos bancarios (configúralos en Pagos). El bot SIEMPRE compartirá los datos cuando el cliente pida transferir.",
+                      icon: CreditCard,
+                    },
                     { id: "whatsapp_contact" as const, label: "Contacto WhatsApp", desc: "Envía al WhatsApp del dueño", icon: Phone },
                     { id: "email_contact" as const, label: "Contacto Email", desc: "Envía al email del negocio", icon: Mail },
                     { id: "custom_message" as const, label: "Mensaje personalizado", desc: "Muestra un mensaje custom", icon: FileText },
@@ -296,6 +318,18 @@ export function SettingsClient({
                     </button>
                   ))}
                 </div>
+
+                {generalForm.contact_action === "payment_link" &&
+                  !bankDetails.trim() &&
+                  (plan === "basic" || !isMPConnected) && (
+                    <div className="flex gap-2 p-3 rounded-lg border border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-200">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <p className="text-sm">
+                        El bot no podrá compartir datos de transferencia hasta que configures los datos bancarios en la pestaña{" "}
+                        <strong>Pagos</strong>.
+                      </p>
+                    </div>
+                  )}
 
                 {generalForm.contact_action === "whatsapp_contact" && (
                   <div className="space-y-2">
@@ -518,10 +552,14 @@ export function SettingsClient({
                 <CardTitle className="flex items-center gap-2 text-base">
                   <CreditCard className="w-4 h-4" />
                   Datos de transferencia bancaria
-                  <Badge variant="secondary" className="ml-auto">Plan Básico</Badge>
+                  <Badge variant="secondary" className="ml-auto">
+                    {plan === "basic" ? "Plan Básico" : "Fallback"}
+                  </Badge>
                 </CardTitle>
                 <CardDescription>
-                  El bot entregará estos datos cuando un cliente quiera pagar por transferencia
+                  {plan === "basic"
+                    ? "El bot entregará estos datos cuando un cliente quiera pagar (opción «Datos de transferencia» en General)."
+                    : "Si Mercado Pago no está conectado, el bot usará estos datos. Configúralos para que el bot siempre pueda compartir cómo pagar por transferencia."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">

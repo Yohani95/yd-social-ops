@@ -69,7 +69,7 @@ async function handleWhatsApp(body: unknown) {
 
   const channel = await findChannelByProviderConfig("whatsapp", "phone_number_id", phoneNumberId);
   if (!channel) {
-    console.warn("[Meta Webhook] No channel found for phone_number_id:", phoneNumberId);
+    console.warn("[Meta Webhook] No channel found — channel_type=whatsapp config_key=phone_number_id config_value=%s (verifica que este ID coincida con el canal conectado en Dashboard > Canales)", phoneNumberId);
     return;
   }
 
@@ -86,7 +86,7 @@ async function handleMessenger(body: unknown) {
 
   const channel = await findChannelByProviderConfig("messenger", "page_id", pageId);
   if (!channel) {
-    console.warn("[Meta Webhook] No channel found for page_id:", pageId);
+    console.warn("[Meta Webhook] No channel found — channel_type=messenger config_key=page_id config_value=%s (verifica que este ID coincida con el canal conectado en Dashboard > Canales)", pageId);
     return;
   }
 
@@ -103,7 +103,7 @@ async function handleInstagram(body: unknown) {
 
   const channel = await findChannelByProviderConfig("instagram", "ig_account_id", igAccountId);
   if (!channel) {
-    console.warn("[Meta Webhook] No channel found for ig_account_id:", igAccountId);
+    console.warn("[Meta Webhook] No channel found — channel_type=instagram config_key=ig_account_id config_value=%s (verifica que este ID coincida con el canal conectado en Dashboard > Canales)", igAccountId);
     return;
   }
 

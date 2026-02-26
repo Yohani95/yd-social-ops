@@ -84,11 +84,11 @@ const CHANNEL_INFO: Record<
     label: "Messenger",
     color: "bg-blue-600",
     icon: "💙",
-    description: "Responder mensajes de Facebook Messenger",
+    description: "Responder mensajes de Facebook Messenger. Incluye mensajes desde Marketplace si tu Página tiene anuncios.",
     steps: [
       { title: "Página de Facebook", description: "Necesitas una Página de Facebook activa", link: "https://www.facebook.com/pages/create" },
       { title: "Conectar con Meta", description: "Vincula tu página para recibir mensajes" },
-      { title: "Verificar conexión", description: "Envía un mensaje a tu página para probar" },
+      { title: "Verificar conexión", description: "Envía un mensaje a tu página (o desde un anuncio de Marketplace) para probar" },
     ],
   },
   instagram: {

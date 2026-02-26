@@ -4,6 +4,8 @@
 
 Esta guía explica paso a paso cómo configurar **la app de Meta** (WhatsApp y Messenger) y **los planes de suscripción en Mercado Pago**.
 
+**Documentación relacionada:** [AI-PROVIDERS.md](./AI-PROVIDERS.md) — proveedores de IA (Groq, Gemini, OpenAI), modelos, límites y fallback.
+
 ---
 
 ## 1. App de Meta (WhatsApp y Messenger)
@@ -99,6 +101,33 @@ En resumen: **ellos vinculan el chat desde tu app** (Dashboard → Canales → A
   y el mismo **Token de verificación**.
 - Suscribir al menos a **messages**.
 - La cuenta de Instagram debe ser **Profesional o Empresa** y estar vinculada a una **Página de Facebook**. Desde tu app, el cliente agrega canal **Instagram** y hace **Conectar con Meta**; se usa la misma OAuth y el backend guarda `ig_account_id` y el token para responder por DM.
+
+### 1.9 Facebook Marketplace
+
+Las conversaciones que un cliente inicia **desde un anuncio de Facebook Marketplace** llegan por **Messenger** a la misma **Página de Facebook** que publicó el anuncio. Meta no envía un tipo de objeto distinto para Marketplace; usa el mismo webhook `object: "page"` y la misma estructura `entry[].messaging[]`.
+
+**Qué deben hacer tus clientes:** Conectar la **Página de Facebook** que usan para vender en Marketplace (Dashboard → Canales → Agregar canal → Messenger → Conectar con Meta). A partir de ahí, los mensajes que les escriban desde un anuncio de Marketplace serán recibidos por tu webhook y atendidos por el bot igual que cualquier mensaje de Messenger. No hace falta configurar nada adicional.
+
+### 1.10 Checklist de verificación y prueba (Meta)
+
+Antes de dar por cerrada la configuración de Meta, comprueba:
+
+1. **Verificación del webhook**
+   - En Meta Developers → WhatsApp (o Messenger) → Configuración → Webhook, URL y token de verificación configurados.
+   - Clic en **Verificar y guardar**. Si falla: revisa que la URL sea accesible desde internet (en local usa ngrok o similar) y que `META_WEBHOOK_VERIFY_TOKEN` en el servidor coincida con el token que pusiste en Meta.
+2. **Variables de entorno en el servidor**
+   - `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`.
+   - En el cliente (para el botón Conectar): `NEXT_PUBLIC_META_APP_ID` (mismo valor que `META_APP_ID`).
+3. **Suscripciones**
+   - WhatsApp y/o Messenger: al menos **messages** suscrito en Campos de suscripción del webhook.
+4. **Conectar canal desde la app**
+   - Dashboard → Canales → Agregar canal → WhatsApp o Messenger → Conectar con Meta.
+   - Tras autorizar, comprobar que no haya `meta_error` en la URL y que el canal aparezca activo.
+   - Para WhatsApp: si en Detalles del canal ves `phone_number_id` en blanco, usar **Sincronizar número**.
+5. **Mensaje de prueba**
+   - Enviar un mensaje al número de WhatsApp o a la Página.
+   - Revisar logs del servidor: no debe aparecer "No channel found for...". Si aparece, el valor que Meta envía (phone_number_id o page_id) no coincide con el guardado en `social_channels`.
+   - Comprobar que el usuario recibe la respuesta del bot y que en Dashboard → Chat Logs figure la conversación con el canal correcto.
 
 ---
 

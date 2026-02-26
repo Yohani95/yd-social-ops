@@ -42,6 +42,9 @@ function buildSystemPrompt(tenant: Tenant, products: Product[]): string {
   const businessDesc = tenant.business_description
     ? `\nDESCRIPCIÓN DEL NEGOCIO: ${tenant.business_description}`
     : "";
+  const addressSection = tenant.business_address
+    ? `\nDIRECCIÓN: ${tenant.business_address}`
+    : "";
 
   const roleLabel: Record<string, string> = {
     products: "asistente de ventas virtual",
@@ -60,8 +63,22 @@ function buildSystemPrompt(tenant: Tenant, products: Product[]): string {
   const catalog = buildCatalogSection(products, businessType);
   const toneInstructions = buildToneInstructions(tenant.bot_tone || "amigable");
   const contactInstructions = buildContactInstructions(tenant);
+  const behaviorInstructions = `
+CONTEXTO Y AMBIGÜEDAD:
+- Si el cliente responde con una sola palabra o número ("2", "si", "ok"), interpreta según la última pregunta que hiciste (ej. "2" = 2 noches si preguntaste cuántas noches).
+- Si no está claro, pregunta amablemente para aclarar.
 
-  return `Eres ${botName}, ${roleLabel[businessType] || "asistente virtual"} de "${businessName}".${businessDesc}
+CONCISIÓN:
+- No repitas información que ya hayas dado en la conversación. Si el cliente ya sabe el precio o los horarios, no los vuelvas a mencionar salvo que pregunte.
+
+IDENTIDAD:
+- Si te preguntan qué modelo de IA eres, responde que eres un asistente de IA de ${businessName} y evita detalles técnicos.
+
+DISPONIBILIDAD POR FECHAS:
+- Si preguntan por fechas o días disponibles, indica que deben contactar directamente al negocio (según el canal configurado).
+`;
+
+  return `Eres ${botName}, ${roleLabel[businessType] || "asistente virtual"} de "${businessName}".${businessDesc}${addressSection}
 Tu objetivo es ${goalLabel[businessType] || goalLabel.mixed}.
 
 ${catalog}
@@ -75,6 +92,8 @@ INSTRUCCIONES GENERALES:
 - Si un item tiene stock y este es 0, informa que no está disponible.
 - Mantén las respuestas concisas (máximo 3 párrafos).
 - No inventes items que no estén en el catálogo.
+
+${behaviorInstructions.trim()}
 
 ${contactInstructions}`;
 }
@@ -150,15 +169,12 @@ function buildContactInstructions(tenant: Tenant): string {
     }
     case "payment_link":
     default: {
-      if (tenant.plan_tier === "basic") {
-        const bankDetails = tenant.bank_details || "Datos bancarios no configurados. Contacta directamente al negocio.";
-        return `MÉTODO DE PAGO (TRANSFERENCIA):
-Cuando un cliente quiera comprar, proporciona estos datos de transferencia:
-${bankDetails}
-- NO generes links de pago.
-- Indica al cliente que envíe el comprobante por este mismo chat.`;
-      }
-      return `MÉTODO DE PAGO (AUTOMÁTICO):
+      const usePaymentTool =
+        (tenant.plan_tier === "pro" || tenant.plan_tier === "enterprise") &&
+        !!tenant.mp_access_token;
+
+      if (usePaymentTool) {
+        return `MÉTODO DE PAGO (AUTOMÁTICO):
 Cuando un cliente quiera comprar:
 1. Confirma qué producto/servicio quiere y la cantidad.
 2. Verifica stock/disponibilidad.
@@ -166,6 +182,25 @@ Cuando un cliente quiera comprar:
 4. El sistema generará automáticamente un link de pago seguro.
 - SIEMPRE usa la función generate_payment_link, no inventes URLs.
 - Si no hay stock, informa amablemente y ofrece alternativas.`;
+      }
+
+      // Plan básico O plan Pro/Enterprise sin MP conectado: usar transferencia
+      const bankDetails =
+        tenant.bank_details?.trim() ||
+        "Datos bancarios no configurados. Indica al cliente que contacte directamente al negocio para concretar el pago.";
+      return `MÉTODO DE PAGO (TRANSFERENCIA BANCARIA):
+Los links de pago automáticos NO están disponibles. Tu ÚNICA opción es compartir los datos de transferencia.
+
+Cuando un cliente quiera comprar, pagar, reservar, o pida "datos de transferencia", "transferir", "datos bancarios":
+- INCLUYE SIEMPRE los datos completos en tu respuesta. Es OBLIGATORIO.
+- NUNCA digas que no puedes proporcionarlos. Los datos están abajo, compártelos.
+- NO los resumas ni omitas. El cliente los necesita para transferir.
+
+DATOS DE TRANSFERENCIA (copiar íntegramente en tu respuesta):
+${bankDetails}
+
+- Indica al cliente que envíe el comprobante por este mismo chat o WhatsApp.
+- NO ofrezcas links de pago ni menciones Mercado Pago (no está disponible).`;
     }
   }
 }
@@ -261,6 +296,35 @@ async function executeGeneratePaymentLink(
 }
 
 // ============================================================
+// Historial de conversación por session_id
+// ============================================================
+async function getChatHistory(
+  tenantId: string,
+  sessionId: string,
+  limit: number
+): Promise<AIMessage[]> {
+  const supabase = createServiceClient();
+  const rows = limit * 2;
+
+  const { data } = await supabase
+    .from("chat_logs")
+    .select("user_message, bot_response")
+    .eq("tenant_id", tenantId)
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: true })
+    .limit(rows);
+
+  if (!data || data.length === 0) return [];
+
+  const history: AIMessage[] = [];
+  for (const row of data) {
+    history.push({ role: "user", content: row.user_message });
+    history.push({ role: "assistant", content: row.bot_response });
+  }
+  return history;
+}
+
+// ============================================================
 // FUNCIÓN PRINCIPAL: processMessage
 // ============================================================
 export async function processMessage(
@@ -280,14 +344,31 @@ export async function processMessage(
     };
   }
 
-  // Construir mensajes
+  // Construir mensajes (con historial si hay session_id)
   const systemPrompt = buildSystemPrompt(tenant, products);
   const usePaymentTools =
     (tenant.contact_action || "payment_link") === "payment_link" &&
-    (tenant.plan_tier === "pro" || tenant.plan_tier === "enterprise");
+    (tenant.plan_tier === "pro" || tenant.plan_tier === "enterprise") &&
+    !!tenant.mp_access_token;
+
+  const historyLimit = parseInt(
+    process.env.AI_CHAT_HISTORY_LIMIT || "10",
+    10
+  );
+  const historyLimitSafe = Math.min(Math.max(historyLimit, 1), 20);
+
+  let chatHistory: AIMessage[] = [];
+  if (request.session_id) {
+    chatHistory = await getChatHistory(
+      tenant_id,
+      request.session_id,
+      historyLimitSafe
+    );
+  }
 
   const messages: AIMessage[] = [
     { role: "system", content: systemPrompt },
+    ...chatHistory,
     { role: "user", content: user_message },
   ];
 
@@ -323,13 +404,15 @@ export async function processMessage(
           });
         }
 
-        // Segunda llamada con resultado del tool
+        // Segunda llamada con resultado del tool (usar mismo modelo Groq si aplica)
         aiResponse = await callAIWithToolResult(
           messages,
           aiResponse.provider,
           toolCall.id,
           toolCall.name,
-          toolResultContent
+          toolResultContent,
+          undefined,
+          aiResponse.modelUsed
         );
       }
     }

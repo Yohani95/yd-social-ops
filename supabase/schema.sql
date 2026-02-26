@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS tenants (
   -- Bot config
   bot_name                 TEXT DEFAULT 'Asistente',
   bot_welcome_message      TEXT DEFAULT '¡Hola! ¿En qué puedo ayudarte hoy?',
+  -- Negocio (extras)
+  business_address         TEXT,
   -- Metadatos
   created_at               TIMESTAMPTZ DEFAULT NOW(),
   updated_at               TIMESTAMPTZ DEFAULT NOW()
@@ -92,7 +94,7 @@ CREATE TABLE IF NOT EXISTS chat_logs (
   product_id       UUID REFERENCES products(id) ON DELETE SET NULL,
   payment_link     TEXT,                -- Link de pago generado (si aplica)
   channel          TEXT NOT NULL DEFAULT 'web'
-                   CHECK (channel IN ('web', 'whatsapp', 'instagram', 'tiktok')),
+                   CHECK (channel IN ('web', 'whatsapp', 'messenger', 'instagram', 'tiktok')),
   tokens_used      INT DEFAULT 0,       -- Para monitorear costos de IA
   created_at       TIMESTAMPTZ DEFAULT NOW()
 );
