@@ -70,6 +70,52 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+// ── Shared layout ─────────────────────────────────────
+
+function baseLayout(content: string, footer = "YD Social Ops"): string {
+  return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f4f4f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f4f4f7">
+    <tr><td align="center" style="padding:24px 16px">
+      <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:580px;background:#ffffff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+        <tr><td style="padding:32px 28px">${content}</td></tr>
+      </table>
+      <p style="font-size:11px;color:#999;margin-top:16px;text-align:center">${footer} · Enviado automáticamente</p>
+    </td></tr>
+  </table>
+</body></html>`;
+}
+
+function heading(text: string, color = "#3b82f6"): string {
+  return `<h1 style="margin:0 0 12px;font-size:22px;color:${color};font-weight:700">${text}</h1>`;
+}
+function p(text: string): string {
+  return `<p style="font-size:15px;color:#333;line-height:1.6;margin:0 0 12px">${text}</p>`;
+}
+function hr(): string {
+  return `<hr style="border:none;border-top:1px solid #eee;margin:20px 0">`;
+}
+function cta(text: string, url: string, color = "#3b82f6"): string {
+  return `<table cellpadding="0" cellspacing="0" role="presentation" style="margin:16px 0">
+    <tr><td style="background:${color};border-radius:8px;padding:12px 24px">
+      <a href="${url}" style="color:#fff;text-decoration:none;font-size:14px;font-weight:600">${text}</a>
+    </td></tr></table>`;
+}
+function infoRow(label: string, value: string): string {
+  return `<tr>
+    <td style="padding:6px 0;font-size:13px;color:#888;width:130px">${label}</td>
+    <td style="padding:6px 0;font-size:14px;color:#333;font-weight:500">${value}</td>
+  </tr>`;
+}
+function infoTable(rows: [string, string][]): string {
+  return `<table cellpadding="0" cellspacing="0" role="presentation" style="width:100%;border:1px solid #eee;border-radius:8px;padding:12px;margin:12px 0">
+    ${rows.map(([l, v]) => infoRow(l, v)).join("")}</table>`;
+}
+
+// ── Templates ─────────────────────────────────────────
+
 function paymentConfirmationTemplate(params: PaymentConfirmationParams): string {
   const amountText = new Intl.NumberFormat("es-CL", {
     style: "currency",
@@ -77,85 +123,97 @@ function paymentConfirmationTemplate(params: PaymentConfirmationParams): string 
     minimumFractionDigits: 0,
   }).format(params.amount || 0);
 
-  return `
-  <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;">
-    <h2 style="margin-bottom:8px;">Pago confirmado</h2>
-    <p>Hola, tu pago fue aprobado correctamente.</p>
-    <p><strong>Negocio:</strong> ${escapeHtml(params.businessName)}</p>
-    <p><strong>Item:</strong> ${escapeHtml(params.productName)}</p>
-    <p><strong>Cantidad:</strong> ${params.quantity}</p>
-    <p><strong>Total:</strong> ${amountText}</p>
-    <p><strong>ID de pago:</strong> ${escapeHtml(params.paymentId)}</p>
-    <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;" />
-    <p style="font-size:12px;color:#6b7280;">Este correo fue enviado automaticamente por YD Social Ops.</p>
-  </div>
-  `;
+  return baseLayout(
+    heading("✅ Pago confirmado", "#16a34a") +
+    p("Tu pago fue aprobado correctamente.") +
+    infoTable([
+      ["Negocio", escapeHtml(params.businessName)],
+      ["Producto", escapeHtml(params.productName)],
+      ["Cantidad", String(params.quantity)],
+      ["Total", amountText],
+      ["ID de pago", escapeHtml(params.paymentId)],
+    ]) +
+    hr() +
+    p("Si tienes alguna duda, no dudes en escribirnos."),
+    params.businessName
+  );
 }
 
 function reservationReminderTemplate(params: ReservationReminderParams): string {
-  return `
-  <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;">
-    <h2 style="margin-bottom:8px;">Recordatorio de reserva</h2>
-    <p>Hola ${escapeHtml(params.guestName || "cliente")}, te recordamos tu reserva.</p>
-    <p><strong>Cabaña:</strong> ${escapeHtml(params.cabinName)}</p>
-    <p><strong>Check-in:</strong> ${escapeHtml(params.checkIn)}</p>
-    ${params.checkOut ? `<p><strong>Check-out:</strong> ${escapeHtml(params.checkOut)}</p>` : ""}
-    <p><strong>Recomendaciones:</strong></p>
-    <ul>
-      <li>Confirma tu horario de llegada.</li>
-      <li>Ten tu documento de identidad a mano.</li>
-      <li>Si necesitas cambios, responde este correo con anticipacion.</li>
-    </ul>
-    <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;" />
-    <p style="font-size:12px;color:#6b7280;">Correo automatico enviado por YD Social Ops.</p>
-  </div>
-  `;
+  const rows: [string, string][] = [
+    ["Reserva", escapeHtml(params.cabinName)],
+    ["Check-in", escapeHtml(params.checkIn)],
+  ];
+  if (params.checkOut) rows.push(["Check-out", escapeHtml(params.checkOut)]);
+
+  return baseLayout(
+    heading("⏰ Recordatorio de reserva", "#f59e0b") +
+    p(`Hola ${escapeHtml(params.guestName || "cliente")}, tu reserva es <strong>mañana</strong>. ¡Te esperamos!`) +
+    infoTable(rows) +
+    `<ul style="font-size:13px;color:#555;line-height:1.8;margin:12px 0;padding-left:20px">
+      <li>Confirma tu horario de llegada</li>
+      <li>Ten tu documento de identidad a mano</li>
+      <li>Si necesitas cambios, responde este correo</li>
+    </ul>` +
+    hr() +
+    p("¡Que disfrutes tu experiencia! 😊")
+  );
 }
 
 function weeklyReportTemplate(params: WeeklyReportParams): string {
-  return `
-  <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;">
-    <h2 style="margin-bottom:8px;">Reporte semanal</h2>
-    <p><strong>Negocio:</strong> ${escapeHtml(params.businessName)}</p>
-    <p><strong>Mensajes:</strong> ${params.totalMessages}</p>
-    <p><strong>Intenciones de compra:</strong> ${params.purchaseIntents}</p>
-    <p><strong>Links de pago:</strong> ${params.paymentLinks}</p>
-    <p><strong>Contactos nuevos/activos:</strong> ${params.contacts}</p>
-    <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;" />
-    <p style="font-size:12px;color:#6b7280;">Correo automatico enviado por YD Social Ops.</p>
-  </div>
-  `;
+  const dashUrl = `${process.env.APP_URL || "https://social.yd-engineering.cl"}/dashboard`;
+
+  return baseLayout(
+    heading("📊 Resumen semanal") +
+    p(`Aquí está tu resumen de la semana para <strong>${escapeHtml(params.businessName)}</strong>.`) +
+    infoTable([
+      ["Mensajes totales", String(params.totalMessages)],
+      ["Intenciones de compra", String(params.purchaseIntents)],
+      ["Links de pago generados", String(params.paymentLinks)],
+      ["Contactos activos", String(params.contacts)],
+    ]) +
+    cta("Ver Dashboard completo", dashUrl) +
+    hr() +
+    p("Este reporte se envía automáticamente cada lunes."),
+    params.businessName
+  );
 }
 
 function leadFollowUpTemplate(params: LeadFollowUpParams): string {
-  return `
-  <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;">
-    <h2 style="margin-bottom:8px;">Seguimos en contacto</h2>
-    <p>Hola ${escapeHtml(params.contactName || "cliente")},</p>
-    <p>
-      Queríamos saber si deseas continuar con tu consulta en
-      <strong> ${escapeHtml(params.businessName)}</strong>.
-    </p>
-    <p>Si quieres, responde este correo y te ayudamos a cerrar tu reserva o compra.</p>
-    <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;" />
-    <p style="font-size:12px;color:#6b7280;">Correo automatico enviado por YD Social Ops.</p>
-  </div>
-  `;
+  return baseLayout(
+    heading("👋 Seguimos en contacto") +
+    p(`Hola ${escapeHtml(params.contactName || "cliente")},`) +
+    p(`Queríamos saber si deseas continuar con tu consulta en <strong>${escapeHtml(params.businessName)}</strong>.`) +
+    p("Si quieres, responde este correo y te ayudamos a cerrar tu reserva o compra.") +
+    hr() +
+    p("¡Estamos aquí para ayudarte!"),
+    params.businessName
+  );
 }
 
 function ownerNewMessageAlertTemplate(params: OwnerNewMessageAlertParams): string {
-  return `
-  <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;">
-    <h2 style="margin-bottom:8px;">Nuevo mensaje en canal externo</h2>
-    <p><strong>Negocio:</strong> ${escapeHtml(params.businessName)}</p>
-    <p><strong>Canal:</strong> ${escapeHtml(params.channel)}</p>
-    <p><strong>Remitente:</strong> ${escapeHtml(params.senderId)}</p>
-    <p><strong>Mensaje:</strong><br/>${escapeHtml(params.message).replace(/\n/g, "<br/>")}</p>
-    ${params.dashboardUrl ? `<p><a href="${escapeHtml(params.dashboardUrl)}">Abrir dashboard</a></p>` : ""}
-    <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;" />
-    <p style="font-size:12px;color:#6b7280;">Correo automatico enviado por YD Social Ops.</p>
-  </div>
-  `;
+  const channelLabel: Record<string, string> = {
+    web: "🌐 Web", whatsapp: "📱 WhatsApp", messenger: "💬 Messenger",
+    instagram: "📸 Instagram", tiktok: "🎵 TikTok",
+  };
+  const dashUrl = params.dashboardUrl || `${process.env.APP_URL || "https://social.yd-engineering.cl"}/dashboard/chat-logs`;
+
+  return baseLayout(
+    heading("🔔 Nuevo mensaje de cliente") +
+    p(`Un cliente acaba de escribir en tu bot de <strong>${escapeHtml(params.businessName)}</strong>.`) +
+    infoTable([
+      ["Canal", channelLabel[params.channel] || escapeHtml(params.channel)],
+      ["Remitente", escapeHtml(params.senderId)],
+    ]) +
+    `<div style="background:#f8f9fa;border-radius:8px;padding:14px;margin:12px 0;border-left:3px solid #3b82f6">
+      <p style="font-size:13px;color:#666;margin:0 0 4px">Mensaje:</p>
+      <p style="font-size:14px;color:#333;margin:0;font-style:italic">"${escapeHtml(params.message).slice(0, 300)}"</p>
+    </div>` +
+    cta("Ver en Chat Logs", dashUrl) +
+    hr() +
+    p("El bot ya respondió automáticamente. Revisa si necesitas intervenir."),
+    params.businessName
+  );
 }
 
 async function sendEmail(params: SendEmailParams): Promise<SendEmailResult> {
@@ -238,6 +296,32 @@ async function sendEmail(params: SendEmailParams): Promise<SendEmailResult> {
     console.warn("[Email] sendEmail exception:", error);
     return { ok: false, reason: "exception" };
   }
+}
+
+export async function sendWelcomeEmail(
+  to: string,
+  businessName: string
+): Promise<SendEmailResult> {
+  const dashUrl = `${process.env.APP_URL || "https://social.yd-engineering.cl"}/dashboard`;
+
+  return sendEmail({
+    to,
+    subject: `¡Bienvenido a ${businessName}!`,
+    html: baseLayout(
+      heading(`¡Bienvenido, ${escapeHtml(businessName)}!`) +
+      p("Tu asistente inteligente está listo para atender a tus clientes 24/7.") +
+      p("Ahora puedes:") +
+      `<ul style="font-size:14px;color:#333;line-height:1.8;margin:12px 0;padding-left:20px">
+        <li>Configurar tu catálogo de productos o servicios</li>
+        <li>Conectar WhatsApp, Messenger o Instagram</li>
+        <li>Personalizar el tono y la personalidad del bot</li>
+      </ul>` +
+      cta("Ir al Dashboard", dashUrl) +
+      hr() +
+      p("¡Mucho éxito con tu negocio! 🎉"),
+      businessName
+    ),
+  });
 }
 
 export async function sendPaymentConfirmationEmail(

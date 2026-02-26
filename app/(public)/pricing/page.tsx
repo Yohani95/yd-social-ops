@@ -6,6 +6,8 @@ import {
   Zap,
   Crown,
   ArrowRight,
+  Building2,
+  Gem,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -34,10 +36,8 @@ const plans: PlanInfo[] = [
       { label: "Gestión de inventario", included: true },
       { label: "Historial de conversaciones", included: true },
       { label: "Links de pago Mercado Pago", included: false },
-      { label: "Descuento de stock automático", included: false },
-      { label: "Integración WhatsApp/Instagram", included: false },
+      { label: "Integración redes sociales", included: false },
       { label: "Analytics avanzados", included: false },
-      { label: "White-label", included: false },
     ],
   },
   {
@@ -57,23 +57,38 @@ const plans: PlanInfo[] = [
       { label: "Múltiples productos en catálogo", included: true },
       { label: "Analytics de conversiones", included: true },
       { label: "Integración WhatsApp/Instagram", included: false },
-      { label: "Múltiples usuarios", included: false },
+      { label: "White-label", included: false },
+    ],
+  },
+  {
+    id: "business",
+    name: "Business",
+    description: "Para negocios con alto volumen de ventas",
+    price: 49990,
+    currency: "CLP",
+    period: "mes",
+    badge: "Escalable",
+    features: [
+      { label: "Todo lo del Plan Pro", included: true },
+      { label: "WhatsApp Business API", included: true },
+      { label: "Instagram Messaging", included: true },
+      { label: "Messenger (incluye Marketplace)", included: true },
+      { label: "CRM avanzado con tags", included: true },
+      { label: "Reportes semanales por email", included: true },
+      { label: "Servidores MCP personalizados", included: true },
       { label: "White-label", included: false },
     ],
   },
   {
     id: "enterprise",
     name: "Enterprise",
-    description: "Para negocios que quieren escalar en todos los canales",
+    description: "Para equipos que quieren escalar en todos los canales",
     price: 79990,
     currency: "CLP",
     period: "mes",
-    badge: "Máximo poder",
     features: [
-      { label: "Todo lo del Plan Pro", included: true },
-      { label: "WhatsApp Business API", included: true },
-      { label: "Instagram Messaging", included: true },
-      { label: "TikTok Shop", included: true },
+      { label: "Todo lo del Plan Business", included: true },
+      { label: "TikTok Business messaging", included: true },
       { label: "Múltiples usuarios (equipo)", included: true },
       { label: "Analytics consolidados", included: true },
       { label: "White-label (tu marca)", included: true },
@@ -81,12 +96,32 @@ const plans: PlanInfo[] = [
       { label: "Soporte prioritario", included: true },
     ],
   },
+  {
+    id: "enterprise_plus",
+    name: "Enterprise+",
+    description: "Solución a medida para grandes empresas",
+    price: 199990,
+    currency: "CLP",
+    period: "mes",
+    badge: "Premium",
+    features: [
+      { label: "Todo lo del Plan Enterprise", included: true },
+      { label: "Onboarding personalizado", included: true },
+      { label: "Entrenamiento del bot a medida", included: true },
+      { label: "API dedicada", included: true },
+      { label: "SLA con 99.9% uptime", included: true },
+      { label: "Integraciones custom (ERP/CRM)", included: true },
+      { label: "Account manager dedicado", included: true },
+    ],
+  },
 ];
 
 const planLinks: Record<string, string> = {
   basic: process.env.MP_PLAN_BASIC_LINK || "/register",
   pro: process.env.MP_PLAN_PRO_LINK || "/register",
+  business: process.env.MP_PLAN_BUSINESS_LINK || "/register",
   enterprise: process.env.MP_PLAN_ENTERPRISE_LINK || "/register",
+  enterprise_plus: process.env.MP_PLAN_ENTERPRISE_PLUS_LINK || "/register",
 };
 
 function formatCLP(amount: number): string {
@@ -97,13 +132,24 @@ function formatCLP(amount: number): string {
   }).format(amount);
 }
 
-const planIcons = {
+const planIcons: Record<string, typeof Bot> = {
   basic: Bot,
   pro: Zap,
+  business: Building2,
   enterprise: Crown,
+  enterprise_plus: Gem,
 };
 
-export const metadata = { title: "Precios" };
+export const metadata = {
+  title: "Precios",
+  description:
+    "Planes desde $9.990 CLP/mes. Bot de ventas con IA, links de pago Mercado Pago, WhatsApp, Instagram y más. 14 días gratis.",
+  openGraph: {
+    title: "Precios — YD Social Ops",
+    description:
+      "Automatiza tus ventas desde $9.990 CLP/mes. 14 días de prueba gratis. Sin tarjeta de crédito.",
+  },
+};
 
 export default function PricingPage() {
   return (
@@ -154,11 +200,10 @@ export default function PricingPage() {
             return (
               <Card
                 key={plan.id}
-                className={`flex flex-col ${
-                  plan.highlighted
-                    ? "border-primary shadow-lg shadow-primary/10 relative"
-                    : ""
-                }`}
+                className={`flex flex-col ${plan.highlighted
+                  ? "border-primary shadow-lg shadow-primary/10 relative"
+                  : ""
+                  }`}
               >
                 {plan.highlighted && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
@@ -179,11 +224,10 @@ export default function PricingPage() {
                 <CardHeader className="pb-4">
                   <div className="flex items-center gap-2 mb-2">
                     <div
-                      className={`w-9 h-9 rounded-lg flex items-center justify-center ${
-                        plan.highlighted
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted"
-                      }`}
+                      className={`w-9 h-9 rounded-lg flex items-center justify-center ${plan.highlighted
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted"
+                        }`}
                     >
                       <Icon className="w-5 h-5" />
                     </div>
@@ -288,6 +332,30 @@ export default function PricingPage() {
           </Link>
         </div>
       </section>
+
+      {/* Footer */}
+      <footer className="border-t py-8">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <Bot className="w-4 h-4" />
+            <span>YD Social Ops © 2026</span>
+          </div>
+          <div className="flex gap-4">
+            <Link href="/pricing" className="hover:text-foreground transition-colors font-medium text-foreground">
+              Precios
+            </Link>
+            <Link href="/privacy" className="hover:text-foreground transition-colors">
+              Privacidad
+            </Link>
+            <Link href="/terms" className="hover:text-foreground transition-colors">
+              Términos
+            </Link>
+            <Link href="/privacy#cookies" className="hover:text-foreground transition-colors">
+              Cookies
+            </Link>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

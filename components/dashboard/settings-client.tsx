@@ -45,8 +45,9 @@ import {
 import {
   createMcpServer,
   deleteMcpServer,
-  getMcpServers,
-  updateMcpServer,
+  listMcpServers,
+  toggleMcpServer,
+  type McpServer,
 } from "@/actions/mcp-servers";
 import { normalizeBaseUrl } from "@/lib/app-url";
 import type {
@@ -54,9 +55,9 @@ import type {
   BusinessType,
   ContactAction,
   BotTone,
-  McpAuthType,
-  McpServer,
 } from "@/types";
+
+type McpAuthType = "none" | "api_key" | "bearer" | "basic" | "custom_header";
 
 interface SettingsClientProps {
   tenant: Tenant | null;
@@ -188,8 +189,8 @@ export function SettingsClient({
     if (plan !== "enterprise") return;
     setIsMcpLoading(true);
     try {
-      const items = await getMcpServers();
-      setMcpServers(items || []);
+      const items = await listMcpServers();
+      setMcpServers(items.data || []);
     } finally {
       setIsMcpLoading(false);
     }
@@ -407,12 +408,10 @@ export function SettingsClient({
     });
   }
 
-  function toggleMcpServer(server: McpServer) {
+  function toggleMcpServerStatus(server: McpServer) {
     if (!isOwner) return;
     startTransition(async () => {
-      const result = await updateMcpServer(server.id, {
-        is_active: !server.is_active,
-      });
+      const result = await toggleMcpServer(server.id, !server.is_active);
 
       if (!result.success) {
         toast.error(result.error || "No se pudo actualizar");
@@ -576,11 +575,10 @@ export function SettingsClient({
                       key={bt.id}
                       type="button"
                       disabled={!isOwner}
-                      className={`p-3 rounded-lg border text-left transition-colors ${
-                        generalForm.business_type === bt.id
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:border-primary/50"
-                      }`}
+                      className={`p-3 rounded-lg border text-left transition-colors ${generalForm.business_type === bt.id
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/50"
+                        }`}
                       onClick={() => setGeneralForm((f) => ({ ...f, business_type: bt.id }))}
                     >
                       <p className="text-sm font-medium">{bt.label}</p>
@@ -638,11 +636,10 @@ export function SettingsClient({
                       key={ca.id}
                       type="button"
                       disabled={!isOwner}
-                      className={`p-3 rounded-lg border text-left transition-colors flex items-start gap-3 ${
-                        generalForm.contact_action === ca.id
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:border-primary/50"
-                      }`}
+                      className={`p-3 rounded-lg border text-left transition-colors flex items-start gap-3 ${generalForm.contact_action === ca.id
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/50"
+                        }`}
                       onClick={() => setGeneralForm((f) => ({ ...f, contact_action: ca.id }))}
                     >
                       <ca.icon className="w-4 h-4 mt-0.5 shrink-0" />
@@ -756,11 +753,10 @@ export function SettingsClient({
                         key={tone.id}
                         type="button"
                         disabled={!isOwner}
-                        className={`p-3 rounded-lg border text-left transition-colors ${
-                          generalForm.bot_tone === tone.id
-                            ? "border-primary bg-primary/5"
-                            : "border-border hover:border-primary/50"
-                        }`}
+                        className={`p-3 rounded-lg border text-left transition-colors ${generalForm.bot_tone === tone.id
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                          }`}
                         onClick={() => setGeneralForm((f) => ({ ...f, bot_tone: tone.id }))}
                       >
                         <p className="text-sm font-medium">{tone.label}</p>
@@ -798,7 +794,7 @@ export function SettingsClient({
                 <>
                   <div className="relative">
                     <pre className="bg-muted rounded-lg p-4 text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all">
-{`<script src="${typeof window !== "undefined" ? window.location.origin : ""}/widget.js"
+                      {`<script src="${typeof window !== "undefined" ? window.location.origin : ""}/widget.js"
   data-tenant-id="${tenant.id}"
   data-bot-name="${generalForm.bot_name}"
   data-welcome="${generalForm.bot_welcome_message}">
@@ -1153,102 +1149,102 @@ export function SettingsClient({
 
                   {(selectedConnector === "resend" || (!selectedConnector && resendForm.is_active)) && (
                     <div className="space-y-3 rounded-md border p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium">Resend (Email)</p>
-                      <label className="text-xs flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={resendForm.is_active}
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium">Resend (Email)</p>
+                        <label className="text-xs flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={resendForm.is_active}
+                            onChange={(e) =>
+                              setResendForm((prev) => ({ ...prev, is_active: e.target.checked }))
+                            }
+                            disabled={!isOwner}
+                          />
+                          Activo
+                        </label>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="resend_from">Email remitente</Label>
+                        <Input
+                          id="resend_from"
+                          value={resendForm.from_email}
                           onChange={(e) =>
-                            setResendForm((prev) => ({ ...prev, is_active: e.target.checked }))
+                            setResendForm((prev) => ({ ...prev, from_email: e.target.value }))
                           }
+                          placeholder="noreply@tu-dominio.com"
                           disabled={!isOwner}
                         />
-                        Activo
-                      </label>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="resend_from">Email remitente</Label>
-                      <Input
-                        id="resend_from"
-                        value={resendForm.from_email}
-                        onChange={(e) =>
-                          setResendForm((prev) => ({ ...prev, from_email: e.target.value }))
-                        }
-                        placeholder="noreply@tu-dominio.com"
-                        disabled={!isOwner}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="resend_api_key">API Key</Label>
-                      <Input
-                        id="resend_api_key"
-                        type="password"
-                        value={resendForm.api_key}
-                        onChange={(e) =>
-                          setResendForm((prev) => ({ ...prev, api_key: e.target.value }))
-                        }
-                        placeholder={resendForm.has_api_key ? "******** (configurada)" : "re_xxx..."}
-                        disabled={!isOwner}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Se almacena cifrada. Deja vacio para mantener la clave actual.
-                      </p>
-                    </div>
-                    {isOwner && (
-                      <Button onClick={saveResendSettings} disabled={isPending}>
-                        Guardar Resend
-                      </Button>
-                    )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="resend_api_key">API Key</Label>
+                        <Input
+                          id="resend_api_key"
+                          type="password"
+                          value={resendForm.api_key}
+                          onChange={(e) =>
+                            setResendForm((prev) => ({ ...prev, api_key: e.target.value }))
+                          }
+                          placeholder={resendForm.has_api_key ? "******** (configurada)" : "re_xxx..."}
+                          disabled={!isOwner}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Se almacena cifrada. Deja vacio para mantener la clave actual.
+                        </p>
+                      </div>
+                      {isOwner && (
+                        <Button onClick={saveResendSettings} disabled={isPending}>
+                          Guardar Resend
+                        </Button>
+                      )}
                     </div>
                   )}
 
                   {(selectedConnector === "n8n" || (!selectedConnector && n8nForm.is_active)) && (
                     <div className="space-y-3 rounded-md border p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium">n8n Webhook</p>
-                      <label className="text-xs flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={n8nForm.is_active}
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium">n8n Webhook</p>
+                        <label className="text-xs flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={n8nForm.is_active}
+                            onChange={(e) =>
+                              setN8nForm((prev) => ({ ...prev, is_active: e.target.checked }))
+                            }
+                            disabled={!isOwner}
+                          />
+                          Activo
+                        </label>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="n8n_webhook">Webhook URL</Label>
+                        <Input
+                          id="n8n_webhook"
+                          value={n8nForm.webhook_url}
                           onChange={(e) =>
-                            setN8nForm((prev) => ({ ...prev, is_active: e.target.checked }))
+                            setN8nForm((prev) => ({ ...prev, webhook_url: e.target.value }))
                           }
+                          placeholder="https://tu-n8n.com/webhook/yd-social-ops"
                           disabled={!isOwner}
                         />
-                        Activo
-                      </label>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="n8n_webhook">Webhook URL</Label>
-                      <Input
-                        id="n8n_webhook"
-                        value={n8nForm.webhook_url}
-                        onChange={(e) =>
-                          setN8nForm((prev) => ({ ...prev, webhook_url: e.target.value }))
-                        }
-                        placeholder="https://tu-n8n.com/webhook/yd-social-ops"
-                        disabled={!isOwner}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="n8n_auth_header">Authorization Header (opcional)</Label>
-                      <Input
-                        id="n8n_auth_header"
-                        type="password"
-                        value={n8nForm.auth_header}
-                        onChange={(e) =>
-                          setN8nForm((prev) => ({ ...prev, auth_header: e.target.value }))
-                        }
-                        placeholder={n8nForm.has_auth_header ? "******** (configurado)" : "Bearer xxx"}
-                        disabled={!isOwner}
-                      />
-                    </div>
-                    {isOwner && (
-                      <Button onClick={saveN8nSettings} disabled={isPending}>
-                        Guardar n8n
-                      </Button>
-                    )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="n8n_auth_header">Authorization Header (opcional)</Label>
+                        <Input
+                          id="n8n_auth_header"
+                          type="password"
+                          value={n8nForm.auth_header}
+                          onChange={(e) =>
+                            setN8nForm((prev) => ({ ...prev, auth_header: e.target.value }))
+                          }
+                          placeholder={n8nForm.has_auth_header ? "******** (configurado)" : "Bearer xxx"}
+                          disabled={!isOwner}
+                        />
+                      </div>
+                      {isOwner && (
+                        <Button onClick={saveN8nSettings} disabled={isPending}>
+                          Guardar n8n
+                        </Button>
+                      )}
                     </div>
                   )}
 
@@ -1597,7 +1593,7 @@ export function SettingsClient({
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => toggleMcpServer(server)}
+                              onClick={() => toggleMcpServerStatus(server)}
                               disabled={isPending}
                             >
                               {server.is_active ? "Desactivar" : "Activar"}

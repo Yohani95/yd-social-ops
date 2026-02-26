@@ -75,11 +75,34 @@
   root.appendChild(bubble);
   document.body.appendChild(root);
 
+  // Simple markdown parser for bot messages
+  function parseMd(text) {
+    var s = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // Markdown links [text](url)
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:' + color + ';text-decoration:underline">$1</a>');
+    // Auto-link raw URLs
+    s = s.replace(/(^|[^"=])(https?:\/\/\S+)/g, '$1<a href="$2" target="_blank" rel="noopener" style="color:' + color + ';text-decoration:underline">$2</a>');
+    // Bold **text**
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    // Italic *text* (not preceded/followed by *)
+    s = s.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
+    // List items: lines starting with - or •
+    s = s.replace(/^[\-•]\s+(.+)$/gm, '<div style="display:flex;gap:6px;align-items:baseline"><span>•</span><span>$1</span></div>');
+    // Line breaks
+    s = s.replace(/\n/g, "<br>");
+    return s;
+  }
+
   function renderMessages() {
     body.innerHTML = "";
     messages.forEach(function (m) {
       var isBot = m.role === "bot";
-      var msg = el("div", { style: { maxWidth: "80%", padding: "10px 14px", borderRadius: isBot ? "16px 16px 16px 4px" : "16px 16px 4px 16px", backgroundColor: isBot ? "#fff" : color, color: isBot ? "#1f2937" : "#fff", fontSize: "14px", lineHeight: "1.5", alignSelf: isBot ? "flex-start" : "flex-end", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", wordBreak: "break-word" } }, m.text);
+      var msg = el("div", { style: { maxWidth: "80%", padding: "10px 14px", borderRadius: isBot ? "16px 16px 16px 4px" : "16px 16px 4px 16px", backgroundColor: isBot ? "#fff" : color, color: isBot ? "#1f2937" : "#fff", fontSize: "14px", lineHeight: "1.5", alignSelf: isBot ? "flex-start" : "flex-end", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", wordBreak: "break-word" } });
+      if (isBot) {
+        msg.innerHTML = parseMd(m.text);
+      } else {
+        msg.textContent = m.text;
+      }
       body.appendChild(msg);
     });
     body.scrollTop = body.scrollHeight;

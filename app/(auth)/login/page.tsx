@@ -3,7 +3,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Bot, Mail, Lock, Loader2 } from "lucide-react";
+import { Bot, Mail, Lock, Loader2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,13 +43,21 @@ function LoginForm() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted/50 p-4">
       <div className="w-full max-w-md min-w-0">
-        {/* Logo */}
-        <div className="flex items-center justify-center gap-2 mb-8">
-
-          <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-            <Bot className="w-6 h-6 text-primary-foreground" />
-          </div>
-          <span className="text-2xl font-bold">YD Social Ops</span>
+        {/* Back + Logo */}
+        <div className="mb-8">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Volver al inicio
+          </Link>
+          <Link href="/" className="flex items-center justify-center gap-2">
+            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
+              <Bot className="w-6 h-6 text-primary-foreground" />
+            </div>
+            <span className="text-2xl font-bold">YD Social Ops</span>
+          </Link>
         </div>
 
         <Card>

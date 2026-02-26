@@ -153,7 +153,17 @@ export default function SetupPage() {
             Onboarding en 5 pasos para dejar tu bot listo
           </p>
         </div>
-        <Badge variant="outline">{completion}% completado</Badge>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            className="border-primary/50 hover:bg-primary/5 text-primary gap-2"
+            onClick={() => router.push("/dashboard/setup/ai-chat")}
+          >
+            <Sparkles className="w-4 h-4" />
+            Configurar con IA
+          </Button>
+          <Badge variant="outline">{completion}% completado</Badge>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -176,9 +186,8 @@ export default function SetupPage() {
                 return (
                   <div
                     key={label}
-                    className={`rounded-md border px-3 py-2 text-sm ${
-                      active ? "border-primary bg-primary/5" : done ? "border-green-400/40 bg-green-500/5" : "border-border"
-                    }`}
+                    className={`rounded-md border px-3 py-2 text-sm ${active ? "border-primary bg-primary/5" : done ? "border-green-400/40 bg-green-500/5" : "border-border"
+                      }`}
                   >
                     <div className="flex items-center gap-2">
                       {done ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <Sparkles className="w-4 h-4 text-muted-foreground" />}
@@ -220,9 +229,8 @@ export default function SetupPage() {
                       <button
                         key={option.id}
                         type="button"
-                        className={`rounded-md border px-3 py-2 text-left text-sm ${
-                          businessType === option.id ? "border-primary bg-primary/10" : "hover:border-primary/50"
-                        }`}
+                        className={`rounded-md border px-3 py-2 text-left text-sm ${businessType === option.id ? "border-primary bg-primary/10" : "hover:border-primary/50"
+                          }`}
                         onClick={() => setBusinessType(option.id)}
                       >
                         {option.label}
@@ -312,9 +320,8 @@ export default function SetupPage() {
                       <button
                         key={option.id}
                         type="button"
-                        className={`rounded-md border px-3 py-2 text-left text-sm ${
-                          contactAction === option.id ? "border-primary bg-primary/10" : "hover:border-primary/50"
-                        }`}
+                        className={`rounded-md border px-3 py-2 text-left text-sm ${contactAction === option.id ? "border-primary bg-primary/10" : "hover:border-primary/50"
+                          }`}
                         onClick={() => setContactAction(option.id)}
                       >
                         {option.label}
@@ -384,9 +391,8 @@ export default function SetupPage() {
                       <button
                         key={option.id}
                         type="button"
-                        className={`rounded-md border px-3 py-2 text-sm ${
-                          botTone === option.id ? "border-primary bg-primary/10" : "hover:border-primary/50"
-                        }`}
+                        className={`rounded-md border px-3 py-2 text-sm ${botTone === option.id ? "border-primary bg-primary/10" : "hover:border-primary/50"
+                          }`}
                         onClick={() => setBotTone(option.id)}
                       >
                         {option.label}
