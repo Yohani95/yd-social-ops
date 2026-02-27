@@ -62,7 +62,7 @@ async function callOpenAI(
     model: "gpt-4o-mini",
     messages: openaiMessages,
     temperature: 0.7,
-    max_tokens: 600,
+    max_tokens: 800,
     ...(tools && tools.length > 0 && {
       tools: tools.map((t) => ({
         type: "function" as const,
@@ -113,7 +113,7 @@ async function callOpenAIWithToolResult(
       { role: "tool", tool_call_id: toolCallId, content: toolResult },
     ],
     temperature: 0.7,
-    max_tokens: 600,
+    max_tokens: 800,
   });
 
   return {
@@ -166,7 +166,7 @@ async function callGroqWithModel(
     model,
     messages: groqMessages,
     temperature: 0.7,
-    max_tokens: 600,
+    max_tokens: 800,
     ...(tools && tools.length > 0 && {
       tools: tools.map((t) => ({
         type: "function" as const,
@@ -242,7 +242,7 @@ async function callGroqWithToolResult(
       { role: "tool" as const, tool_call_id: toolCallId, content: toolResult },
     ],
     temperature: 0.7,
-    max_tokens: 600,
+    max_tokens: 800,
   });
 
   return {
@@ -296,7 +296,7 @@ async function callGemini(
     config: {
       systemInstruction: systemMsg?.content,
       temperature: 0.7,
-      maxOutputTokens: 600,
+      maxOutputTokens: 800,
       tools: geminiTools,
     },
   });
@@ -359,7 +359,7 @@ async function callGeminiWithToolResult(
     config: {
       systemInstruction: systemMsg?.content,
       temperature: 0.7,
-      maxOutputTokens: 600,
+      maxOutputTokens: 800,
     },
   });
 

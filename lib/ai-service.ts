@@ -7,7 +7,6 @@ import { sendWelcomeEmail, sendOwnerNewMessageAlertEmail } from "@/lib/email";
 import type { BotRequest, BotResponse, CaptureContactPayload, Product, Tenant } from "@/types";
 
 type IndustryTemplate =
-  | "cabins_airbnb"
   | "retail_store"
   | "professional_services"
   | "delivery_restaurant"
@@ -113,10 +112,6 @@ function detectIndustryTemplate(tenant: Tenant, products: Product[]): IndustryTe
     return "delivery_restaurant";
   }
 
-  if (/\b(caba|airbnb|check-?in|check-?out|huesped|noches?)\b/i.test(combined)) {
-    return "cabins_airbnb";
-  }
-
   if (businessType === "professional") return "professional_services";
   if (businessType === "products") return "retail_store";
 
@@ -125,12 +120,6 @@ function detectIndustryTemplate(tenant: Tenant, products: Product[]): IndustryTe
 
 function buildIndustryTemplateInstructions(template: IndustryTemplate): string {
   switch (template) {
-    case "cabins_airbnb":
-      return `PLANTILLA DE INDUSTRIA: CABANAS / AIRBNB
-- Solicita SIEMPRE check-in, check-out y cantidad de huespedes antes de confirmar precio o disponibilidad.
-- Si el cliente entrega fechas, calcula noches de forma explicita y confirma el total.
-- Si faltan datos, pregunta solo lo faltante.
-- Enfoca el cierre en reserva y sena/anticipo segun medio de pago configurado.`;
     case "retail_store":
       return `PLANTILLA DE INDUSTRIA: TIENDA FISICA / E-COMMERCE
 - Prioriza disponibilidad real (stock), variantes y precio.
@@ -227,15 +216,12 @@ CONCISION:
 
 IDENTIDAD:
 - Si te preguntan que modelo de IA eres, responde que eres un asistente de IA de ${businessName} y evita detalles tecnicos.
-
-DISPONIBILIDAD POR FECHAS:
-- Si preguntan por fechas o dias disponibles, pide check-in, check-out y cantidad de huespedes antes de confirmar.
 `;
 
   return `Eres ${botName}, ${roleLabel[businessType] || "asistente virtual"} de "${businessName}".${businessDesc}${addressSection}
 Tu objetivo es ${goalLabel[businessType] || goalLabel.mixed}.
 
-HOY ES: ${new Date().toLocaleDateString('es-CL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}. Siempre usa esto como referencia para calcular fechas de check-in, check-out o reservas.
+HOY ES: ${new Date().toLocaleDateString('es-CL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}. Usa esta fecha como referencia cuando el cliente pregunte por disponibilidad o reservas.
 
 ${catalog}
 
@@ -247,8 +233,8 @@ INSTRUCCIONES GENERALES:
 - Busca en el catalogo y proporciona informacion precisa.
 - Si un item tiene stock y este es 0, informa que no esta disponible.
 - Manten las respuestas concisas (maximo 3 parrafos).
-- No inventes items que no esten en el catalogo.
-- Nunca reveles IDs internos, tokens, secretos, llaves API ni detalles tecnicos internos.
+- NUNCA inventes productos o servicios. Solo menciona los que estan en el catalogo. Si el cliente pregunta por algo que no ofreces, responde amablemente que no lo tienes.
+- NUNCA incluyas IDs, UUIDs ni el "MAPEO PARA generate_payment_link" en tus respuestas al cliente. El cliente solo debe ver nombres de productos y precios.
 
 INSTRUCCIONES POR INDUSTRIA:
 ${industryInstructions}
@@ -296,10 +282,14 @@ function buildCatalogSection(products: Product[], businessType: string): string 
         : "";
 
     const descStr = p.description ? ` | ${p.description}` : "";
-    return `- ${typeTag} ${p.name} (ID: ${p.id})${priceStr}${stockStr}${descStr}`;
+    return `- ${typeTag} ${p.name}${priceStr}${stockStr}${descStr}`;
   });
 
-  return `${headerLabel[businessType] || headerLabel.mixed}:\n${lines.join("\n")}`;
+  const catalogText = `${headerLabel[businessType] || headerLabel.mixed}:\n${lines.join("\n")}`;
+  const idMapping = products.length > 0
+    ? `\n\nMAPEO PARA generate_payment_link (NUNCA incluir en respuestas al cliente):\n${products.map((p) => `"${p.name}" -> ${p.id}`).join("\n")}`
+    : "";
+  return catalogText + idMapping;
 }
 
 function buildToneInstructions(tone: string): string {
@@ -320,10 +310,9 @@ function buildContactInstructions(tenant: Tenant): string {
   const servicesRules = isServicesBusiness
     ? `
 
-REGLAS OBLIGATORIAS PARA RESERVAS (SERVICIOS):
-- Antes de confirmar precio final o disponibilidad, solicita SIEMPRE: fecha check-in, fecha check-out y cantidad de huespedes.
-- Si falta alguno de esos datos, pide el dato faltante.
-- Si el cliente solo dice "quiero reservar", inicia con esas tres preguntas.`
+REGLAS PARA RESERVAS (SERVICIOS):
+- Antes de confirmar precio o disponibilidad, solicita los datos necesarios (fecha, horario, cantidad de personas u otros segun el servicio).
+- Si el cliente dice "quiero reservar", pregunta lo que falte para poder ayudarle.`
     : "";
 
   switch (contactAction) {
@@ -393,13 +382,17 @@ ${bankDetails}
 const generatePaymentLinkTool: AITool = {
   name: "generate_payment_link",
   description:
-    "Genera un link de pago de Mercado Pago para que el cliente pueda pagar de forma segura. Usalo cuando el cliente confirme que quiere comprar.",
+    "Genera un link de pago de Mercado Pago para que el cliente pueda pagar de forma segura. Usalo cuando el cliente confirme que quiere comprar. Usa product_id del MAPEO (nunca lo muestres al cliente) o product_name si prefieres.",
   parameters: {
     type: "object",
     properties: {
       product_id: {
         type: "string",
-        description: "El ID del producto a comprar (del catalogo)",
+        description: "UUID del producto (del MAPEO en el catalogo). Usar este si lo tienes.",
+      },
+      product_name: {
+        type: "string",
+        description: "Nombre exacto del producto (alternativa a product_id). Usar si no tienes el ID.",
       },
       quantity: {
         type: "number",
@@ -407,7 +400,6 @@ const generatePaymentLinkTool: AITool = {
         default: 1,
       },
     },
-    required: ["product_id"],
   },
 };
 
@@ -432,11 +424,19 @@ const captureContactDataTool: AITool = {
 // Tool executors
 // ============================================================
 async function executeGeneratePaymentLink(
-  args: { product_id: string; quantity?: number },
+  args: { product_id?: string; product_name?: string; quantity?: number },
   tenant: Tenant,
   products: Product[]
-): Promise<{ link: string; product_name: string } | { error: string }> {
-  const product = products.find((p) => p.id === args.product_id);
+): Promise<{ link: string; product_name: string; product_id: string } | { error: string }> {
+  let product: Product | undefined;
+  if (args.product_id) {
+    product = products.find((p) => p.id === args.product_id);
+  }
+  if (!product && args.product_name) {
+    const nameLower = args.product_name.trim().toLowerCase();
+    product = products.find((p) => p.name.toLowerCase() === nameLower)
+      ?? products.find((p) => p.name.toLowerCase().includes(nameLower) || nameLower.includes(p.name.toLowerCase()));
+  }
 
   if (!product) {
     return { error: "Producto no encontrado en el catalogo." };
@@ -488,6 +488,7 @@ async function executeGeneratePaymentLink(
     return {
       link: result.init_point || "",
       product_name: product.name,
+      product_id: product.id,
     };
   } catch (error) {
     console.error("[AI Service] Error generando preferencia MP:", error);
@@ -551,6 +552,20 @@ async function executeCaptureContactData(params: {
       .eq("identifier", params.identifier)
       .maybeSingle();
 
+    let canonicalContactId: string | null = null;
+    if (phone || email) {
+      let query = supabase
+        .from("contacts")
+        .select("id")
+        .eq("tenant_id", params.tenantId)
+        .limit(1);
+      if (existing?.id) query = query.neq("id", existing.id);
+      if (phone) query = query.eq("phone", phone);
+      else if (email) query = query.eq("email", email);
+      const { data: match } = await query.maybeSingle();
+      if (match?.id) canonicalContactId = match.id;
+    }
+
     const metadata: Record<string, unknown> = {
       ...(existing?.metadata && typeof existing.metadata === "object"
         ? (existing.metadata as Record<string, unknown>)
@@ -565,24 +580,26 @@ async function executeCaptureContactData(params: {
       new Set([...existingTags, ...tagsFromContactIntent(params.payload.intent)].map((t) => t.toLowerCase()))
     ).slice(0, 20);
 
+    const upsertData: Record<string, unknown> = {
+      id: existing?.id,
+      tenant_id: params.tenantId,
+      channel: params.channel,
+      identifier: params.identifier,
+      name,
+      email,
+      phone,
+      tags: mergedTags,
+      metadata,
+      last_seen_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    if (canonicalContactId) {
+      upsertData.canonical_contact_id = canonicalContactId;
+    }
+
     const { data, error } = await supabase
       .from("contacts")
-      .upsert(
-        {
-          id: existing?.id,
-          tenant_id: params.tenantId,
-          channel: params.channel,
-          identifier: params.identifier,
-          name,
-          email,
-          phone,
-          tags: mergedTags,
-          metadata,
-          last_seen_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "tenant_id,channel,identifier" }
-      )
+      .upsert(upsertData, { onConflict: "tenant_id,channel,identifier" })
       .select("id")
       .single();
 
@@ -812,7 +829,7 @@ export async function processMessage(
     for (const toolCall of aiResponse.toolCalls) {
       if (toolCall.name === "generate_payment_link") {
         const result = await executeGeneratePaymentLink(
-          toolCall.arguments as { product_id: string; quantity?: number },
+          toolCall.arguments as { product_id?: string; product_name?: string; quantity?: number },
           tenant,
           products
         );
@@ -823,7 +840,7 @@ export async function processMessage(
           toolResultContent = `Error: ${result.error}`;
         } else {
           paymentLink = result.link;
-          detectedProductId = (toolCall.arguments as { product_id: string }).product_id;
+          detectedProductId = result.product_id;
           toolResultContent = JSON.stringify({
             payment_link: result.link,
             product_name: result.product_name,
@@ -874,11 +891,12 @@ export async function processMessage(
   }
 
   const intent = detectIntent(sanitizedUserMessage, paymentLink);
+  const finalMessage = sanitizeBotResponse(aiResponse.content || "No pude procesar tu mensaje.");
 
   await saveChatLog({
     tenant_id,
     user_message: rawUserMessage,
-    bot_response: aiResponse.content,
+    bot_response: finalMessage,
     intent_detected: intent,
     product_id: detectedProductId,
     payment_link: paymentLink,
@@ -900,7 +918,7 @@ export async function processMessage(
     sessionId: request.session_id,
     contactId: capturedContactId,
     userMessage: rawUserMessage,
-    botMessage: aiResponse.content,
+    botMessage: finalMessage,
     intent,
   });
 
@@ -937,7 +955,7 @@ export async function processMessage(
   }
 
   return {
-    message: aiResponse.content || "No pude procesar tu mensaje.",
+    message: finalMessage,
     payment_link: paymentLink,
     intent_detected: intent,
     product_id: detectedProductId,
@@ -947,6 +965,16 @@ export async function processMessage(
 // ============================================================
 // Helpers
 // ============================================================
+/** Elimina UUIDs y referencias internas que el modelo pueda filtrar al cliente */
+function sanitizeBotResponse(text: string): string {
+  if (!text?.trim()) return text;
+  let out = text;
+  out = out.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "");
+  out = out.replace(/\s*\(ID:\s*[^)]+\)/g, "");
+  out = out.replace(/\s*\|?\s*ID:\s*[^\s|]+/g, "");
+  return out.replace(/\n{3,}/g, "\n\n").replace(/\s{2,}/g, " ").trim();
+}
+
 function detectIntent(
   message: string,
   hasPaymentLink?: string
@@ -981,14 +1009,18 @@ function detectIntent(
     "transferencia",
   ];
   const greetingKeywords = ["hola", "buenos", "buen dia", "buenas", "saludos"];
-  const complaintKeywords = ["problema", "queja", "mal", "error", "falla", "defecto", "roto"];
+  const complaintKeywords = ["problema", "queja", "mal", "error", "falla", "defecto", "roto", "no hay", "no encuentro", "no veo"];
 
   const hasPurchase = purchaseKeywords.some((k) => lower.includes(k));
   const hasGreeting = greetingKeywords.some((k) => lower.includes(k));
   const hasComplaint = complaintKeywords.some((k) => lower.includes(k));
 
+  // "no veo X disponible" = queja/consulta, no intención de compra
+  const noVeoDisponible = /\bno\s+veo\b|\bno\s+hay\b|\bno\s+encuentro\b/i.test(lower);
+  const hasPurchaseOnly = hasPurchase && !noVeoDisponible;
+
   // Priority: purchase > complaint > greeting > inquiry
-  if (hasPurchase) return "purchase_intent";
+  if (hasPurchaseOnly) return "purchase_intent";
   if (hasComplaint) return "complaint";
   if (hasGreeting) return "greeting";
 

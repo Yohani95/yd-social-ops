@@ -34,6 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { getAppUrl } from "@/lib/app-url";
 import { updateBankDetails, updateTenant, disconnectMP } from "@/actions/tenant";
 import {
   getIntegrationSettings,
@@ -794,7 +795,7 @@ export function SettingsClient({
                 <>
                   <div className="relative">
                     <pre className="bg-muted rounded-lg p-4 text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all">
-                      {`<script src="${typeof window !== "undefined" ? window.location.origin : ""}/widget.js"
+                      {`<script src="${getAppUrl()}/widget.js"
   data-tenant-id="${tenant.id}"
   data-bot-name="${generalForm.bot_name}"
   data-welcome="${generalForm.bot_welcome_message}">
@@ -805,7 +806,7 @@ export function SettingsClient({
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                      const snippet = `<script src="${window.location.origin}/widget.js" data-tenant-id="${tenant.id}" data-bot-name="${generalForm.bot_name}" data-welcome="${generalForm.bot_welcome_message}"></script>`;
+                      const snippet = `<script src="${getAppUrl()}/widget.js" data-tenant-id="${tenant.id}" data-bot-name="${generalForm.bot_name}" data-welcome="${generalForm.bot_welcome_message}"></script>`;
                       navigator.clipboard.writeText(snippet);
                       toast.success("Código copiado al portapapeles");
                     }}

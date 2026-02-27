@@ -390,6 +390,23 @@ Fix Instagram: OAuth completo	Dashboard → Canales	🟡 Canal sin token	1h
 Migración SQL: contacts + conversation_memory	Supabase SQL Editor	🟡 Base de datos	2h
 
 
+FASE 1.5 — Integración de Chats Meta (implementado Feb 2026)
+Mejoras en WhatsApp, Instagram y Messenger para simplificar la conexión y ampliar capacidades.
+
+| Tarea | Estado | Archivos |
+|-------|--------|----------|
+| WhatsApp: selector de número (API phone_numbers) | ✅ Hecho | actions/channels.ts, channels/page.tsx |
+| Captura automática de contactos en primer mensaje | ✅ Hecho | lib/contacts.ts, api/webhooks/meta |
+| Deduplicación de contactos (canonical_contact_id) | ✅ Hecho | supabase/migrations, lib/contacts.ts, lib/ai-service.ts |
+| Transcripción de audio (Whisper) | ✅ Hecho | lib/audio-transcription.ts, channel-adapters, webhooks/meta |
+| UI responsive conversaciones | ✅ Hecho | contacts/page.tsx, chat-logs/page.tsx |
+| Indicar canal en conversaciones | Parcial | Ya visible en badges (contacts, chat-logs) |
+| Flujo un clic para conexión Meta | Parcial | OAuth existente; wizard mejorado en channels |
+
+Migración pendiente: ejecutar `supabase/migrations/20260227_contacts_canonical_dedup.sql` en Supabase.
+
+---
+
 FASE 2
 Semana 3-5	Bot inteligente y CRM
 El bot se vuelve realmente útil. Los dueños empiezan a ver valor real.

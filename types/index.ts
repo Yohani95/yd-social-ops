@@ -201,6 +201,8 @@ export interface Contact {
   last_seen_at: string;
   created_at: string;
   updated_at: string;
+  /** ID del contacto canónico cuando es el mismo cliente en otro canal (deduplicación). */
+  canonical_contact_id?: string | null;
 }
 
 export type McpAuthType = "none" | "bearer" | "api_key";

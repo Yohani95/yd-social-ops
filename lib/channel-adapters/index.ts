@@ -9,6 +9,10 @@ export interface ParsedMessage {
   senderId: string;
   message: string;
   metadata?: Record<string, unknown>;
+  /** Media ID para audio (WhatsApp). Se usa para obtener URL desde Meta API. */
+  audioMediaId?: string;
+  /** URL directa del audio (Messenger/Instagram). Si existe, se usa para transcribir. */
+  audioUrl?: string;
 }
 
 export interface ChannelAdapter {

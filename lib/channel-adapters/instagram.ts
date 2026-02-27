@@ -17,7 +17,11 @@ export class InstagramAdapter implements ChannelAdapter {
           id?: string;
           messaging?: Array<{
             sender?: { id?: string };
-            message?: { text?: string; mid?: string };
+            message?: {
+              text?: string;
+              mid?: string;
+              attachments?: Array<{ type?: string; payload?: { url?: string } }>;
+            };
           }>;
         }>;
       };
@@ -27,16 +31,34 @@ export class InstagramAdapter implements ChannelAdapter {
       const entry = data?.entry?.[0];
       const messaging = entry?.messaging?.[0];
 
-      if (!messaging?.message?.text || !messaging?.sender?.id) return null;
+      if (!messaging?.sender?.id) return null;
 
-      return {
-        senderId: messaging.sender.id,
-        message: messaging.message.text,
-        metadata: {
-          ig_account_id: entry?.id,
-          message_id: messaging.message.mid,
-        },
-      };
+      const msg = messaging.message;
+      if (msg?.text) {
+        return {
+          senderId: messaging.sender.id,
+          message: msg.text,
+          metadata: {
+            ig_account_id: entry?.id,
+            message_id: msg.mid,
+          },
+        };
+      }
+
+      const audioAtt = msg?.attachments?.find((a) => a.type === "audio");
+      if (audioAtt?.payload?.url) {
+        return {
+          senderId: messaging.sender.id,
+          message: "",
+          metadata: {
+            ig_account_id: entry?.id,
+            message_id: msg?.mid,
+          },
+          audioUrl: audioAtt.payload.url,
+        };
+      }
+
+      return null;
     } catch {
       return null;
     }

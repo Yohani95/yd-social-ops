@@ -24,6 +24,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
                 from?: string;
                 type?: string;
                 text?: { body?: string };
+                audio?: { id?: string };
               }>;
             };
           }>;
@@ -37,15 +38,30 @@ export class WhatsAppAdapter implements ChannelAdapter {
       if (value?.messaging_product !== "whatsapp") return null;
 
       const msg = value?.messages?.[0];
-      if (!msg || msg.type !== "text" || !msg.text?.body) return null;
+      if (!msg || !msg.from) return null;
 
-      return {
-        senderId: msg.from || "unknown",
-        message: msg.text.body,
-        metadata: {
-          phone_number_id: value.metadata?.phone_number_id,
-        },
-      };
+      if (msg.type === "text" && msg.text?.body) {
+        return {
+          senderId: msg.from,
+          message: msg.text.body,
+          metadata: {
+            phone_number_id: value.metadata?.phone_number_id,
+          },
+        };
+      }
+
+      if (msg.type === "audio" && msg.audio?.id) {
+        return {
+          senderId: msg.from,
+          message: "",
+          metadata: {
+            phone_number_id: value.metadata?.phone_number_id,
+          },
+          audioMediaId: msg.audio.id,
+        };
+      }
+
+      return null;
     } catch {
       return null;
     }

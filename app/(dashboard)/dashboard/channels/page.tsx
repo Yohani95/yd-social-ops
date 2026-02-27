@@ -46,6 +46,9 @@ import {
   deleteChannel,
   syncWhatsAppChannel,
   subscribeMetaWebhook,
+  updateWhatsAppConfig,
+  getWhatsAppPhoneNumbers,
+  selectWhatsAppPhoneNumber,
 } from "@/actions/channels";
 import {
   WhatsAppIcon,
@@ -53,6 +56,7 @@ import {
   InstagramIcon,
   TikTokIcon,
 } from "@/components/ui/social-icons";
+import { getAppUrl } from "@/lib/app-url";
 import type { SocialChannel, ChatChannel } from "@/types";
 
 const CHANNEL_INFO: Record<
@@ -135,6 +139,8 @@ export default function ChannelsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
+  const [whatsappPhones, setWhatsappPhones] = useState<Record<string, Array<{ id: string; display_phone_number: string }>>>({});
+  const [selectedPhoneId, setSelectedPhoneId] = useState<Record<string, string>>({});
 
   const plan = tenant?.plan_tier || "basic";
   const limits = PLAN_LIMITS[plan] || PLAN_LIMITS.basic;
@@ -259,7 +265,7 @@ export default function ChannelsPage() {
     return true;
   });
 
-  const appUrl = typeof window !== "undefined" ? window.location.origin : "";
+  const appUrl = getAppUrl();
 
   return (
     <div className="space-y-6">
@@ -430,7 +436,7 @@ export default function ChannelsPage() {
                                   if (result.success) {
                                     getChannels().then(setChannels);
                                     const hasId = result.data?.phone_number_id;
-                                    toast.success(hasId ? "Número sincronizado correctamente" : "Sincronizado. Si sigue en null, reconecta con Meta.");
+                                    toast.success(hasId ? "Número sincronizado correctamente" : "Sincronizado. Si sigue en null, usa el formulario manual abajo.");
                                   } else {
                                     toast.error(result.error || "Error al sincronizar");
                                   }
@@ -441,31 +447,153 @@ export default function ChannelsPage() {
                               Sincronizar número
                             </Button>
                           )}
-                          {(ch.channel_type === "messenger" || ch.channel_type === "instagram") && ch.access_token && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={isPending}
-                              onClick={() => {
-                                startTransition(async () => {
-                                  const result = await subscribeMetaWebhook(ch.id);
-                                  if (result.success) {
-                                    toast.success("Webhook suscrito correctamente en Meta.");
-                                  } else {
-                                    toast.error(result.error || "Error al suscribir webhook");
-                                  }
-                                });
-                              }}
-                            >
-                              {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5 mr-1" />}
-                              Suscribir Webhook
-                            </Button>
-                          )}
                         </div>
+                        {/* WhatsApp: selector de número o formulario manual */}
+                        {ch.channel_type === "whatsapp" && ch.access_token && (
+                          !(ch.provider_config as Record<string, string>)?.phone_number_id
+                        ) && (
+                            <div className="mt-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5 space-y-3">
+                              <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                                Selecciona el número de WhatsApp Business que quieres usar.
+                              </p>
+                              {(ch.provider_config as Record<string, string>)?.waba_id ? (
+                                <div className="flex flex-col sm:flex-row gap-2">
+                                  {!whatsappPhones[ch.id] ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={isPending}
+                                      className="h-8 w-full sm:w-auto"
+                                      onClick={() => {
+                                        startTransition(async () => {
+                                          const result = await getWhatsAppPhoneNumbers(ch.id);
+                                          if (result.success && result.data) {
+                                            setWhatsappPhones((prev) => ({ ...prev, [ch.id]: result.data! }));
+                                            if (result.data.length === 1) {
+                                              setSelectedPhoneId((prev) => ({ ...prev, [ch.id]: result.data![0].id }));
+                                            }
+                                          } else {
+                                            toast.error(result.error || "No se pudieron cargar los números");
+                                          }
+                                        });
+                                      }}
+                                    >
+                                      {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Cargar números"}
+                                    </Button>
+                                  ) : (
+                                    <>
+                                      <select
+                                        value={selectedPhoneId[ch.id] || ""}
+                                        onChange={(e) => setSelectedPhoneId((prev) => ({ ...prev, [ch.id]: e.target.value }))}
+                                        className="flex h-8 flex-1 rounded-md border border-input bg-background px-3 py-1 text-xs ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+                                      >
+                                        <option value="">Selecciona un número</option>
+                                        {whatsappPhones[ch.id].map((p) => (
+                                          <option key={p.id} value={p.id}>
+                                            {p.display_phone_number}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        disabled={isPending || !selectedPhoneId[ch.id]}
+                                        className="h-8"
+                                        onClick={() => {
+                                          startTransition(async () => {
+                                            const pid = selectedPhoneId[ch.id];
+                                            if (!pid) return;
+                                            const result = await selectWhatsAppPhoneNumber(ch.id, pid);
+                                            if (result.success) {
+                                              getChannels().then(setChannels);
+                                              toast.success("Número configurado correctamente");
+                                              setWhatsappPhones((prev) => {
+                                                const next = { ...prev };
+                                                delete next[ch.id];
+                                                return next;
+                                              });
+                                              setSelectedPhoneId((prev) => {
+                                                const next = { ...prev };
+                                                delete next[ch.id];
+                                                return next;
+                                              });
+                                            } else {
+                                              toast.error(result.error || "Error al guardar");
+                                            }
+                                          });
+                                        }}
+                                      >
+                                        {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Guardar"}
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              ) : (
+                                <>
+                                  <p className="text-xs text-muted-foreground">
+                                    Si no aparece el botón anterior, copia los IDs desde{" "}
+                                    <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener noreferrer" className="underline">
+                                      Meta Developers
+                                    </a>{" "}
+                                    → WhatsApp → Configuración de la API.
+                                  </p>
+                                  <form
+                                    className="flex flex-col sm:flex-row gap-2"
+                                    onSubmit={(e) => {
+                                      e.preventDefault();
+                                      const form = e.target as HTMLFormElement;
+                                      const phoneId = (form.elements.namedItem("wa_phone_id") as HTMLInputElement).value;
+                                      const wabaIdVal = (form.elements.namedItem("wa_waba_id") as HTMLInputElement).value;
+                                      if (!phoneId || !wabaIdVal) {
+                                        toast.error("Ambos campos son obligatorios");
+                                        return;
+                                      }
+                                      startTransition(async () => {
+                                        const result = await updateWhatsAppConfig(ch.id, phoneId, wabaIdVal);
+                                        if (result.success) {
+                                          getChannels().then(setChannels);
+                                          toast.success("WhatsApp configurado correctamente");
+                                        } else {
+                                          toast.error(result.error || "Error al guardar");
+                                        }
+                                      });
+                                    }}
+                                  >
+                                    <Input name="wa_phone_id" placeholder="Phone Number ID" className="text-xs h-8 flex-1" />
+                                    <Input name="wa_waba_id" placeholder="WABA ID" className="text-xs h-8 flex-1" />
+                                    <Button type="submit" size="sm" disabled={isPending} className="h-8">
+                                      {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Guardar"}
+                                    </Button>
+                                  </form>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        {(ch.channel_type === "messenger" || ch.channel_type === "instagram") && ch.access_token && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={isPending}
+                            onClick={() => {
+                              startTransition(async () => {
+                                const result = await subscribeMetaWebhook(ch.id);
+                                if (result.success) {
+                                  toast.success("Webhook suscrito correctamente en Meta.");
+                                } else {
+                                  toast.error(result.error || "Error al suscribir webhook");
+                                }
+                              });
+                            }}
+                          >
+                            {isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5 mr-1" />}
+                            Suscribir Webhook
+                          </Button>
+                        )}
                         <p className="text-xs text-muted-foreground break-words">
                           {ch.access_token
                             ? ch.channel_type === "whatsapp"
-                              ? "Si Facebook te devolvió sin pedir elegir número, usa «Sincronizar número» para obtener el ID desde el token."
+                              ? "Si los IDs no se obtuvieron automáticamente, completa el formulario con los datos de Meta Developers."
                               : "Si configuras tu canal aquí y en Meta, usa «Suscribir Webhook» para conectarlos."
                             : "Se abrirá Facebook para que autorices la conexión. Requiere META_APP_ID configurado."}
                         </p>
@@ -543,12 +671,14 @@ export default function ChannelsPage() {
                       </Button>
                     </div>
                   </CardContent>
-                )}
+                )
+                }
               </Card>
             );
           })}
         </div>
-      )}
+      )
+      }
 
       {/* Add channel dialog */}
       <AddChannelDialog
@@ -560,7 +690,7 @@ export default function ChannelsPage() {
           setShowAdd(false);
         }}
       />
-    </div>
+    </div >
   );
 }
 

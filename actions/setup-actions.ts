@@ -1,7 +1,19 @@
 "use server";
 
 import { createServiceClient } from "@/lib/supabase/server";
+
+/** Elimina fugas de sintaxis interna (funciones, JSON) que el modelo pueda mostrar al usuario */
+function sanitizeAssistantResponse(text: string): string {
+    let out = text;
+    out = out.replace(/<function[^>]*>[\s\S]*?<\/function>/gi, "");
+    out = out.replace(/\{\s*"(?:business_name|bot_name|bot_tone|bot_welcome_message|business_type|items|delete_all)"[\s\S]*?\}/g, "");
+    out = out.replace(/\b(?:update_tenant_config|create_products_bulk|delete_products_bulk)\b/gi, "");
+    out = out.replace(/\s+con la función\s*\./gi, ".");
+    out = out.replace(/\s+con la función\s*,/gi, ",");
+    return out.replace(/\n{3,}/g, "\n\n").replace(/\s{2,}/g, " ").trim() || "Listo.";
+}
 import { callAIWithToolResult, callAI, type AIMessage, type AITool } from "@/lib/ai-providers";
+import { getAppUrl } from "@/lib/app-url";
 import type { Tenant, Product } from "@/types";
 
 const updateTenantTool: AITool = {
@@ -45,6 +57,18 @@ const createProductsTool: AITool = {
     }
 };
 
+const deleteProductsTool: AITool = {
+    name: "delete_products_bulk",
+    description: "Elimina todos los productos del catálogo del negocio. Usar cuando el usuario pida borrar, eliminar o vaciar sus productos.",
+    parameters: {
+        type: "object",
+        properties: {
+            delete_all: { type: "boolean", description: "Debe ser true para confirmar la eliminación de todos los productos" }
+        },
+        required: ["delete_all"]
+    }
+};
+
 export async function processSetupChat(
     tenantId: string,
     userMessage: string,
@@ -64,17 +88,29 @@ export async function processSetupChat(
             return { message: "Error interno: no se encontró tu cuenta.", newHistory: [] };
         }
 
-        const systemPrompt = `Eres "Setup Assistant", el asistente de configuración interna para dueños de negocios en la plataforma YD Social Ops.
-Tu objetivo es ayudar al usuario (el dueño) a configurar SU PROPIO bot y catálogo de manera rápida y amigable, con unas pocas preguntas.
-NO ERES EL BOT DE VENTAS de sus clientes. Eres el experto que le ayuda a armarlo.
+        const channelsUrl = `${getAppUrl()}/dashboard/channels`;
+        const productsUrl = `${getAppUrl()}/dashboard/products`;
 
-PROCESO DE SETUP:
-1. Pregunta qué tipo de negocio tiene y su nombre comercial (si no lo sabes).
-2. Pregúntale o pídele que pegue una lista de sus productos/servicios con sus precios. (Utiliza 'create_products_bulk' cuando te lo digan).
-3. Pregunta cómo quiere que su bot actúe (tono) y su nombre. (Utiliza 'update_tenant_config').
-4. Cuando el bot y el catálogo estén listos, dile al usuario que puede ir a la pestaña "Probar Bot" para ver los resultados.
+        const systemPrompt = `Eres "Setup Assistant", el asistente de configuración para dueños de negocios en YD Social Ops.
+Ayudas a configurar el bot y el catálogo. NO eres el bot de ventas de sus clientes.
 
-Datos actuales del negocio (actualiza lo que falte):
+IMPORTANTE: NUNCA muestres al usuario nombres de funciones, JSON, parámetros técnicos ni sintaxis como <function=...>. Responde SIEMPRE en lenguaje natural y amigable. Si vas a usar una herramienta, hazlo en silencio y luego explica el resultado con palabras simples.
+
+HERRAMIENTAS DISPONIBLES (usa internamente, no las menciones al usuario):
+- update_tenant_config: actualizar nombre del negocio, tipo, tono del bot, mensaje de bienvenida.
+- create_products_bulk: añadir productos/servicios al catálogo (evita duplicados por nombre).
+- delete_products_bulk: eliminar TODOS los productos del catálogo. Usa cuando pidan "borrar todos", "eliminar productos", "vaciar catálogo".
+
+LO QUE NO PUEDES HACER:
+- Conectar WhatsApp, Instagram o Messenger: eso se hace en la app. Si preguntan cómo conectar WhatsApp/canales, responde amablemente que deben ir a "Canales" en el menú del dashboard: ${channelsUrl} - ahí pueden conectar Meta (WhatsApp, Messenger, Instagram) con un clic. NO inventes pasos con tokens ni números.
+- Editar productos uno por uno: para eso está la página de Productos: ${productsUrl}
+
+RESPUESTAS CORRECTAS:
+- "borra todos mis productos" → usa delete_products_bulk con delete_all: true.
+- "cómo conecto WhatsApp" → "Ve a Canales en el menú del dashboard. Ahí puedes conectar WhatsApp, Instagram y Messenger con tu cuenta de Meta en pocos clic."
+- "quiero productos" → pide la lista y usa create_products_bulk.
+
+Datos actuales del negocio:
 - Nombre: ${tenantData.business_name || "No definido"}
 - Tipo: ${tenantData.business_type || "No definido"}
 - Bot Name: ${tenantData.bot_name || "No definido"}
@@ -84,7 +120,7 @@ Datos actuales del negocio (actualiza lo que falte):
         const nextHistory: AIMessage[] = [...chatHistory, { role: "user", content: userMessage }];
         const aiMessages: AIMessage[] = [{ role: "system", content: systemPrompt }, ...nextHistory];
 
-        let aiResponse = await callAI(aiMessages, [updateTenantTool, createProductsTool]);
+        let aiResponse = await callAI(aiMessages, [updateTenantTool, createProductsTool, deleteProductsTool]);
 
         if (aiResponse.toolCalls && aiResponse.toolCalls.length > 0) {
             for (const toolCall of aiResponse.toolCalls) {
@@ -98,14 +134,47 @@ Datos actuales del negocio (actualiza lo que falte):
                 }
                 else if (toolCall.name === "create_products_bulk") {
                     const args = toolCall.arguments as { items: Product[] };
-                    const toInsert = args.items.map(item => ({
-                        ...item,
-                        tenant_id: tenantId,
-                        is_active: true
-                    }));
-                    const { error } = await supabase.from("products").insert(toInsert);
-                    if (error) toolResultString = "Error al guardar productos: " + error.message;
-                    else toolResultString = "Se insertaron " + toInsert.length + " productos en el catálogo de forma exitosa.";
+                    const { data: existing } = await supabase
+                        .from("products")
+                        .select("name")
+                        .eq("tenant_id", tenantId);
+                    const existingNames = new Set(
+                        (existing || []).map((p) => (p.name || "").toLowerCase().trim())
+                    );
+                    const toInsert = args.items
+                        .map(item => ({
+                            ...item,
+                            tenant_id: tenantId,
+                            is_active: true
+                        }))
+                        .filter(item => {
+                            const name = (item.name || "").toLowerCase().trim();
+                            if (!name) return false;
+                            if (existingNames.has(name)) return false;
+                            existingNames.add(name);
+                            return true;
+                        });
+                    if (toInsert.length === 0) {
+                        toolResultString = "No se añadieron productos nuevos: todos ya existían en el catálogo (evitando duplicados).";
+                    } else {
+                        const { error } = await supabase.from("products").insert(toInsert);
+                        if (error) toolResultString = "Error al guardar productos: " + error.message;
+                        else toolResultString = "Se insertaron " + toInsert.length + " producto(s) nuevo(s) en el catálogo. Los que ya existían fueron omitidos.";
+                    }
+                }
+                else if (toolCall.name === "delete_products_bulk") {
+                    const args = toolCall.arguments as { delete_all?: boolean };
+                    if (args?.delete_all) {
+                        const { data: deleted, error } = await supabase
+                            .from("products")
+                            .delete()
+                            .eq("tenant_id", tenantId)
+                            .select("id");
+                        if (error) toolResultString = "Error al eliminar productos: " + error.message;
+                        else toolResultString = "Se eliminaron " + (deleted?.length ?? 0) + " producto(s) del catálogo.";
+                    } else {
+                        toolResultString = "No se eliminó nada. Para borrar todos los productos, delete_all debe ser true.";
+                    }
                 }
 
                 aiResponse = await callAIWithToolResult(
@@ -120,9 +189,11 @@ Datos actuales del negocio (actualiza lo que falte):
             }
         }
 
-        nextHistory.push({ role: "assistant", content: aiResponse.content || "Procedimiento completo." });
+        const rawContent = aiResponse.content || "Procedimiento completo.";
+        const sanitized = sanitizeAssistantResponse(rawContent);
+        nextHistory.push({ role: "assistant", content: sanitized });
 
-        return { message: aiResponse.content || "¡Listo!", newHistory: nextHistory };
+        return { message: sanitizeAssistantResponse(aiResponse.content || "¡Listo!"), newHistory: nextHistory };
     } catch (error: any) {
         console.error("[Setup Assistant] Error:", error);
         return { message: "Lo siento, ocurrió un error procesando la configuración.", newHistory: chatHistory };

@@ -4,7 +4,13 @@ import { processMessage } from "@/lib/ai-service";
 import { checkAIRateLimit } from "@/lib/rate-limit";
 import { getAdapter } from "@/lib/channel-adapters";
 import { notifyOwnerOnFirstExternalMessage } from "@/lib/owner-alerts";
-import type { BotRequest, SocialChannel, ChatChannel } from "@/types";
+import { ensureContactExists } from "@/lib/contacts";
+import {
+  getMetaMediaUrl,
+  transcribeAudioFromUrl,
+} from "@/lib/audio-transcription";
+import type { SocialChannel, ChatChannel } from "@/types";
+import type { ParsedMessage } from "@/lib/channel-adapters";
 
 /**
  * GET /api/webhooks/meta
@@ -77,7 +83,7 @@ async function handleWhatsApp(body: unknown) {
     return;
   }
 
-  await processAndReply(channel, "whatsapp", parsed.senderId, parsed.message);
+  await processAndReply(channel, "whatsapp", parsed);
 }
 
 async function handleMessenger(body: unknown) {
@@ -94,7 +100,7 @@ async function handleMessenger(body: unknown) {
     return;
   }
 
-  await processAndReply(channel, "messenger", parsed.senderId, parsed.message);
+  await processAndReply(channel, "messenger", parsed);
 }
 
 async function handleInstagram(body: unknown) {
@@ -127,7 +133,7 @@ async function handleInstagram(body: unknown) {
     return;
   }
 
-  await processAndReply(channel, "instagram", parsed.senderId, parsed.message);
+  await processAndReply(channel, "instagram", parsed);
 }
 
 async function findChannelByProviderConfig(
@@ -153,14 +159,43 @@ async function findChannelByProviderConfig(
 async function processAndReply(
   channel: SocialChannel,
   channelType: ChatChannel,
-  senderId: string,
-  message: string
+  parsed: ParsedMessage
 ) {
+  const { senderId } = parsed;
+  let message = parsed.message;
+
+  if (!message && (parsed.audioMediaId || parsed.audioUrl)) {
+    try {
+      let audioUrl: string | null = null;
+      if (parsed.audioMediaId && channel.access_token) {
+        audioUrl = await getMetaMediaUrl(parsed.audioMediaId, channel.access_token as string);
+      } else if (parsed.audioUrl) {
+        audioUrl = parsed.audioUrl;
+      }
+      if (audioUrl) {
+        message = await transcribeAudioFromUrl(audioUrl);
+      }
+    } catch (err) {
+      console.warn("[Meta Webhook] Error transcribiendo audio:", err);
+    }
+    if (!message) {
+      message = "[Mensaje de voz no transcrito]";
+    }
+  }
+
+  if (!message && !parsed.audioMediaId && !parsed.audioUrl) return;
+
+  await ensureContactExists({
+    tenantId: channel.tenant_id,
+    channel: channelType,
+    identifier: senderId,
+  });
+
   await notifyOwnerOnFirstExternalMessage({
     tenantId: channel.tenant_id,
     channel: channelType,
     senderId,
-    message,
+    message: message || "",
   });
 
   const rateLimit = checkAIRateLimit(channel.tenant_id);
@@ -174,15 +209,13 @@ async function processAndReply(
     return;
   }
 
-  const botRequest: BotRequest = {
+  const response = await processMessage({
     tenant_id: channel.tenant_id,
-    user_message: message,
+    user_message: message || "",
     session_id: `${channelType}_${senderId}`,
     user_identifier: senderId,
     channel: channelType,
-  };
-
-  const response = await processMessage(botRequest);
+  });
 
   const adapter = getAdapter(channelType);
   const formattedMessage = adapter.formatMessage(response.message);

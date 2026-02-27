@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, forwardRef } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, Send, User, ChevronLeft, Sparkles, Loader2, ArrowRight } from "lucide-react";
+import { Bot, Send, User, ChevronLeft, Sparkles, Loader2, ArrowRight, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { processSetupChat } from "@/actions/setup-actions";
 import { useDashboard } from "@/components/dashboard/dashboard-context";
 import { toast } from "sonner";
@@ -26,20 +26,25 @@ export default function SetupAiChatPage() {
     const [isLoading, setIsLoading] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
 
+    const SUGGESTIONS = [
+        "Configurar nombre y tipo de negocio",
+        "Añadir productos o servicios",
+        "Borrar todos los productos",
+        "¿Cómo conecto WhatsApp?",
+    ];
+
     useEffect(() => {
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [messages]);
 
-    async function handleSend() {
-        if (!input.trim() || isLoading) return;
+    async function handleSend(msg?: string) {
+        const text = (msg ?? input).trim();
+        if (!text || isLoading) return;
 
-        const userMsg = input.trim();
         setInput("");
-
-        // Agregar el mensaje de usuario optimísticamente
-        setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+        setMessages((prev) => [...prev, { role: "user", content: text }]);
         setIsLoading(true);
 
         try {
@@ -48,13 +53,20 @@ export default function SetupAiChatPage() {
                 toast.error("No se detectó el tenant válido");
                 return;
             }
-            const result = await processSetupChat(tenantId, userMsg, messages);
+            const result = await processSetupChat(tenantId, text, messages);
             setMessages(result.newHistory);
         } catch (error) {
             toast.error("Hubo un error al procesar tu mensaje");
             console.error(error);
         } finally {
             setIsLoading(false);
+        }
+    }
+
+    function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            handleSend();
         }
     }
 
@@ -73,10 +85,16 @@ export default function SetupAiChatPage() {
                         <p className="text-sm text-muted-foreground">Configura tu negocio chateando</p>
                     </div>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => router.push("/dashboard/channels/simulator")}>
-                    Probar Bot
-                    <ArrowRight className="ml-2 w-4 h-4" />
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => router.push("/dashboard/channels")}>
+                        <Share2 className="w-4 h-4 mr-2" />
+                        Conectar canales
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => router.push("/dashboard/channels/simulator")}>
+                        Probar Bot
+                        <ArrowRight className="ml-2 w-4 h-4" />
+                    </Button>
+                </div>
             </div>
 
             <Card className="flex-1 flex flex-col overflow-hidden border-primary/20 bg-gradient-to-b from-background to-muted/20">
@@ -117,27 +135,45 @@ export default function SetupAiChatPage() {
                     </div>
                 </ScrollArea>
 
-                <CardContent className="p-4 border-t bg-background shrink-0">
+                <CardContent className="p-4 border-t bg-background shrink-0 space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                        Puedo ayudarte con: configurar tu negocio, añadir o borrar productos, y guiarte para conectar WhatsApp.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                        {SUGGESTIONS.map((s) => (
+                            <button
+                                key={s}
+                                type="button"
+                                onClick={() => handleSend(s)}
+                                disabled={isLoading}
+                                className="text-xs px-3 py-1.5 rounded-full border border-border bg-muted/50 hover:bg-muted transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                            >
+                                {s}
+                            </button>
+                        ))}
+                    </div>
                     <form
                         onSubmit={(e) => {
                             e.preventDefault();
                             handleSend();
                         }}
-                        className="flex gap-2"
+                        className="flex gap-2 items-end"
                     >
-                        <Input
+                        <Textarea
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
-                            placeholder="Escribe algo como: mi negocio es una tienda de ropa..."
+                            onKeyDown={handleKeyDown}
+                            placeholder="Escribe aquí... Por ejemplo: mi negocio es una tienda de ropa, quiero añadir estos productos..."
                             disabled={isLoading}
-                            className="flex-1"
+                            rows={4}
+                            className="min-h-[80px] sm:min-h-[100px] max-h-[280px] resize-y flex-1"
                         />
-                        <Button type="submit" disabled={isLoading || !input.trim()}>
+                        <Button type="submit" disabled={isLoading || !input.trim()} size="icon" className="shrink-0 h-10 w-10">
                             {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                         </Button>
                     </form>
-                    <p className="text-[10px] text-center text-muted-foreground mt-2">
-                        El asistente guardará automáticamente los cambios en tu perfil de negocio y catálogo.
+                    <p className="text-[10px] text-center text-muted-foreground">
+                        Enter para enviar · Shift+Enter para nueva línea
                     </p>
                 </CardContent>
             </Card>
@@ -145,10 +181,12 @@ export default function SetupAiChatPage() {
     );
 }
 
-function ScrollArea({ children, className, ref }: { children: React.ReactNode; className?: string; ref?: any }) {
-    return (
-        <div ref={ref} className={`overflow-y-auto ${className}`}>
-            {children}
-        </div>
-    );
-}
+const ScrollArea = forwardRef<HTMLDivElement, { children: React.ReactNode; className?: string }>(
+    function ScrollArea({ children, className }, ref) {
+        return (
+            <div ref={ref} className={`overflow-y-auto ${className}`}>
+                {children}
+            </div>
+        );
+    }
+);

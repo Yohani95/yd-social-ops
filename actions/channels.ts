@@ -236,3 +236,145 @@ export async function subscribeMetaWebhook(channelId: string): Promise<ActionRes
     return { success: false, error: err instanceof Error ? err.message : "Error desconocido" };
   }
 }
+
+export interface WhatsAppPhoneNumber {
+  id: string;
+  display_phone_number: string;
+  verified_name?: string;
+  quality_rating?: string;
+}
+
+/**
+ * Obtiene la lista de números de WhatsApp asociados al WABA del canal.
+ * Permite al usuario seleccionar su número sin copiar IDs manualmente.
+ */
+export async function getWhatsAppPhoneNumbers(
+  channelId: string
+): Promise<ActionResult<WhatsAppPhoneNumber[]>> {
+  const ctx = await getAuthenticatedContext();
+  if (!ctx) return { success: false, error: "No autenticado" };
+
+  const { data: channel, error: fetchError } = await ctx.supabase
+    .from("social_channels")
+    .select("channel_type, access_token, provider_config")
+    .eq("id", channelId)
+    .eq("tenant_id", ctx.tenantId)
+    .single();
+
+  if (fetchError || !channel) return { success: false, error: "Canal no encontrado" };
+  if (channel.channel_type !== "whatsapp") return { success: false, error: "Solo aplica a canales WhatsApp" };
+  if (!channel.access_token) return { success: false, error: "El canal no tiene token. Usa Reconectar con Meta." };
+
+  const wabaId = (channel.provider_config as Record<string, string>)?.waba_id;
+  if (!wabaId) return { success: false, error: "No hay WABA ID. Usa Sincronizar número o completa manualmente." };
+
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v22.0/${wabaId}/phone_numbers?access_token=${encodeURIComponent(channel.access_token as string)}`
+    );
+    const data = await res.json();
+
+    if (data.error) {
+      return { success: false, error: data.error.message || "Error al obtener números" };
+    }
+
+    const phones = (data.data || []) as WhatsAppPhoneNumber[];
+    if (phones.length === 0) {
+      return { success: false, error: "No hay números registrados en esta cuenta de WhatsApp Business." };
+    }
+
+    return { success: true, data: phones };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Error desconocido" };
+  }
+}
+
+/**
+ * Guarda el phone_number_id seleccionado por el usuario (cuando ya tiene waba_id).
+ */
+export async function selectWhatsAppPhoneNumber(
+  channelId: string,
+  phoneNumberId: string
+): Promise<ActionResult> {
+  const ctx = await getAuthenticatedContext();
+  if (!ctx) return { success: false, error: "No autenticado" };
+  if (!phoneNumberId?.trim()) return { success: false, error: "Selecciona un número" };
+
+  const { data: channel } = await ctx.supabase
+    .from("social_channels")
+    .select("channel_type, provider_config")
+    .eq("id", channelId)
+    .eq("tenant_id", ctx.tenantId)
+    .single();
+
+  if (!channel) return { success: false, error: "Canal no encontrado" };
+  if (channel.channel_type !== "whatsapp") return { success: false, error: "Solo aplica a canales WhatsApp" };
+
+  const providerConfig = {
+    ...((channel.provider_config as Record<string, unknown>) || {}),
+    phone_number_id: phoneNumberId.trim(),
+  };
+
+  const { error } = await ctx.supabase
+    .from("social_channels")
+    .update({
+      provider_config: providerConfig,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", channelId)
+    .eq("tenant_id", ctx.tenantId);
+
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath("/dashboard/channels");
+  return { success: true };
+}
+
+/**
+ * Permite al usuario guardar manualmente el phone_number_id y waba_id
+ * desde el panel de Meta Developers. Necesario porque el flujo OAuth
+ * estándar de Facebook no devuelve estos IDs para WhatsApp
+ * (requiere WhatsApp Embedded Signup).
+ */
+export async function updateWhatsAppConfig(
+  channelId: string,
+  phoneNumberId: string,
+  wabaId: string
+): Promise<ActionResult> {
+  const ctx = await getAuthenticatedContext();
+  if (!ctx) return { success: false, error: "No autenticado" };
+
+  if (!phoneNumberId || !wabaId) {
+    return { success: false, error: "Phone Number ID y WABA ID son obligatorios" };
+  }
+
+  const { data: channel } = await ctx.supabase
+    .from("social_channels")
+    .select("id, channel_type, provider_config")
+    .eq("id", channelId)
+    .eq("tenant_id", ctx.tenantId)
+    .single();
+
+  if (!channel) return { success: false, error: "Canal no encontrado" };
+  if (channel.channel_type !== "whatsapp") return { success: false, error: "Solo aplica a canales WhatsApp" };
+
+  const providerConfig = {
+    ...((channel.provider_config as Record<string, unknown>) || {}),
+    phone_number_id: phoneNumberId.trim(),
+    waba_id: wabaId.trim(),
+  };
+
+  const { error: updateError } = await ctx.supabase
+    .from("social_channels")
+    .update({
+      provider_config: providerConfig,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", channelId)
+    .eq("tenant_id", ctx.tenantId);
+
+  if (updateError) return { success: false, error: updateError.message };
+
+  revalidatePath("/dashboard/channels");
+  return { success: true };
+}

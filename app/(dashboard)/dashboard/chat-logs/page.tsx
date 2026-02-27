@@ -356,7 +356,7 @@ export default function ChatLogsPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <CardDescription className="text-xs">
+                      <CardDescription className="text-xs" suppressHydrationWarning>
                         {formatDate(group.lastDate)}
                       </CardDescription>
                       {!isSingleMessage &&
@@ -370,11 +370,18 @@ export default function ChatLogsPage() {
                 </CardHeader>
 
                 {/* Messages */}
-                <CardContent className="space-y-2">
-                  {(isSingleMessage || isExpanded
-                    ? group.logs
-                    : group.logs.slice(-1)
-                  ).map((log, idx) => (
+                <CardContent className="space-y-2 p-0 sm:p-6">
+                  <div
+                    className={
+                      isExpanded && group.logs.length > 5
+                        ? "max-h-[min(70vh,500px)] overflow-y-auto px-4 pb-4 pt-2 sm:px-6 sm:pb-6 sm:pt-4"
+                        : "px-4 pb-4 pt-2 sm:px-6 sm:pb-6 sm:pt-4"
+                    }
+                  >
+                    {(isSingleMessage || isExpanded
+                      ? group.logs
+                      : group.logs.slice(-1)
+                    ).map((log, idx) => (
                     <div
                       key={log.id}
                       className={
@@ -384,7 +391,7 @@ export default function ChatLogsPage() {
                       }
                     >
                       {!isSingleMessage && isExpanded && (
-                        <p className="text-[10px] text-muted-foreground mb-1">
+                        <p className="text-[10px] text-muted-foreground mb-1" suppressHydrationWarning>
                           {formatDate(log.created_at)}
                           {log.user_identifier &&
                             ` · ${log.user_identifier}`}
@@ -415,10 +422,11 @@ export default function ChatLogsPage() {
                       )}
                     </div>
                   ))}
+                  </div>
 
                   {/* "Show more" hint when collapsed */}
                   {!isSingleMessage && !isExpanded && (
-                    <p className="text-[11px] text-muted-foreground text-center pt-1">
+                    <p className="text-[11px] text-muted-foreground text-center pt-1 px-4 pb-4 sm:px-6 sm:pb-6">
                       Mostrando último mensaje ·{" "}
                       <button
                         onClick={() => toggleSession(group.sessionId)}
