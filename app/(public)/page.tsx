@@ -26,6 +26,7 @@ import {
   MercadoPagoIcon,
 } from "@/components/ui/social-icons";
 import JsonLd from "@/components/seo/json-ld";
+import { LandingNav } from "@/components/landing/landing-nav";
 
 const features = [
   {
@@ -89,49 +90,21 @@ const testimonials = [
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-background">
-      {/* Navbar */}
-      <nav className="border-b sticky top-0 bg-background/80 backdrop-blur-sm z-10">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <Bot className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <span className="font-bold text-lg">YD Social Ops</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Link href="/pricing">
-              <Button variant="ghost" size="sm">
-                Precios
-              </Button>
-            </Link>
-            <Link href="/login">
-              <Button variant="ghost" size="sm">
-                Iniciar sesión
-              </Button>
-            </Link>
-            <Link href="/register">
-              <Button size="sm">
-                Empezar gratis
-                <ArrowRight className="w-4 h-4" />
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </nav>
+    <div className="min-h-screen bg-background overflow-x-hidden">
+      <LandingNav />
 
       {/* Hero */}
-      <section className="max-w-6xl mx-auto px-4 sm:px-6 pt-20 pb-16 text-center">
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 pt-12 sm:pt-20 pb-12 sm:pb-16 text-center">
         <Badge variant="secondary" className="mb-4">
           <Zap className="w-3 h-3 mr-1" />
           Automatiza tus ventas hoy mismo
         </Badge>
-        <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight mb-6">
+        <h1 className="text-2xl sm:text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight mb-4 sm:mb-6">
           Tu bot de ventas
           <br />
           <span className="text-primary">inteligente en redes sociales</span>
         </h1>
-        <p className="text-base sm:text-xl text-muted-foreground max-w-2xl mx-auto mb-8">
+        <p className="text-sm sm:text-xl text-muted-foreground max-w-2xl mx-auto mb-6 sm:mb-8 px-1">
           Responde clientes, genera links de pago de Mercado Pago y descuenta
           stock automáticamente — mientras tú descansas.
         </p>
@@ -193,8 +166,8 @@ export default function LandingPage() {
 
       {/* How it works */}
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-16 border-t">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl font-bold mb-4">
+        <div className="text-center mb-8 sm:mb-12">
+          <h2 className="text-2xl sm:text-3xl font-bold mb-3 sm:mb-4">
             Listo en 3 pasos
           </h2>
           <p className="text-muted-foreground max-w-xl mx-auto">
@@ -250,7 +223,7 @@ export default function LandingPage() {
           <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">
             Se integra con las plataformas que ya usas
           </p>
-          <div className="flex flex-wrap items-center justify-center gap-8 sm:gap-12">
+          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-8 md:gap-12">
             <div className="flex items-center gap-2 text-muted-foreground hover:text-green-600 transition-colors">
               <WhatsAppIcon size={28} />
               <span className="text-sm font-medium">WhatsApp</span>
@@ -277,8 +250,8 @@ export default function LandingPage() {
 
       {/* Features */}
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-16 border-t">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl font-bold mb-4">
+        <div className="text-center mb-8 sm:mb-12">
+          <h2 className="text-2xl sm:text-3xl font-bold mb-3 sm:mb-4">
             Todo lo que necesitas para vender más
           </h2>
           <p className="text-muted-foreground max-w-xl mx-auto">
@@ -303,8 +276,8 @@ export default function LandingPage() {
 
       {/* Testimonials */}
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-16 border-t">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl font-bold mb-4">
+        <div className="text-center mb-8 sm:mb-12">
+          <h2 className="text-2xl sm:text-3xl font-bold mb-3 sm:mb-4">
             Miles de vendedores ya lo usan
           </h2>
         </div>
@@ -355,8 +328,8 @@ export default function LandingPage() {
 
       {/* CTA Final */}
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-16 border-t">
-        <div className="rounded-2xl bg-primary text-primary-foreground p-8 sm:p-12 text-center">
-          <h2 className="text-3xl font-bold mb-4">
+        <div className="rounded-2xl bg-primary text-primary-foreground p-6 sm:p-8 md:p-12 text-center">
+          <h2 className="text-2xl sm:text-3xl font-bold mb-3 sm:mb-4">
             Empieza a vender más hoy mismo
           </h2>
           <p className="text-primary-foreground/80 mb-8 max-w-md mx-auto">
@@ -378,12 +351,12 @@ export default function LandingPage() {
 
       {/* Footer */}
       <footer className="border-t py-8">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground flex-wrap">
           <div className="flex items-center gap-2">
             <Bot className="w-4 h-4" />
             <span>YD Social Ops © 2026</span>
           </div>
-          <div className="flex gap-4">
+          <div className="flex flex-wrap gap-3 sm:gap-4 justify-center sm:justify-end">
             <Link href="/pricing" className="hover:text-foreground transition-colors">
               Precios
             </Link>
