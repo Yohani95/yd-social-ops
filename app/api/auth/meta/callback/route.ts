@@ -179,7 +179,7 @@ export async function GET(request: NextRequest) {
       const pageId = providerConfig.page_id as string;
       if (pageId && finalAccessToken) {
         const fields = channel_type === "instagram"
-          ? "messages,messaging_postbacks,instagram_manage_messages"
+          ? "messages,messaging_postbacks"
           : "messages,messaging_postbacks";
 
         try {

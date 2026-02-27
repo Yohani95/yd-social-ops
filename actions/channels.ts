@@ -218,7 +218,7 @@ export async function subscribeMetaWebhook(channelId: string): Promise<ActionRes
   try {
     let fields = "messages,messaging_postbacks";
     if (channel.channel_type === "instagram") {
-      fields = "messages,messaging_postbacks,instagram_manage_messages";
+      fields = "messages,messaging_postbacks";
     }
 
     const url = `https://graph.facebook.com/v21.0/${pageId}/subscribed_apps?subscribed_fields=${fields}&access_token=${channel.access_token}`;
