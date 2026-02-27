@@ -43,6 +43,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const objectType = body?.object;
 
+    // Debug log para ver exactamente qué envía Meta
+    console.info("[Meta Webhook] Received POST — object:", objectType, "body:", JSON.stringify(body).substring(0, 500));
+
     if (objectType === "whatsapp_business_account") {
       await handleWhatsApp(body);
     } else if (objectType === "page") {
@@ -97,14 +100,30 @@ async function handleMessenger(body: unknown) {
 async function handleInstagram(body: unknown) {
   const adapter = getAdapter("instagram");
   const parsed = adapter.parseIncoming(body);
-  if (!parsed) return;
+  if (!parsed) {
+    console.warn("[Meta Webhook] Instagram: no se pudo parsear el mensaje entrante");
+    return;
+  }
 
   const igAccountId = parsed.metadata?.ig_account_id as string;
-  if (!igAccountId) return;
+  if (!igAccountId) {
+    console.warn("[Meta Webhook] Instagram: falta ig_account_id en metadata");
+    return;
+  }
 
-  const channel = await findChannelByProviderConfig("instagram", "ig_account_id", igAccountId);
+  console.info("[Meta Webhook] Instagram: buscando canal con ig_account_id =", igAccountId);
+
+  // Intenta buscar por ig_account_id primero
+  let channel = await findChannelByProviderConfig("instagram", "ig_account_id", igAccountId);
+
+  // Fallback: buscar por page_id (a veces Meta envía el page_id en entry.id)
   if (!channel) {
-    console.warn("[Meta Webhook] No channel found — channel_type=instagram config_key=ig_account_id config_value=%s (verifica que este ID coincida con el canal conectado en Dashboard > Canales)", igAccountId);
+    console.info("[Meta Webhook] Instagram: no encontrado por ig_account_id, intentando por page_id");
+    channel = await findChannelByProviderConfig("instagram", "page_id", igAccountId);
+  }
+
+  if (!channel) {
+    console.warn("[Meta Webhook] No channel found — channel_type=instagram ig_account_id=%s (verifica que este ID coincida con el canal conectado en Dashboard > Canales)", igAccountId);
     return;
   }
 
