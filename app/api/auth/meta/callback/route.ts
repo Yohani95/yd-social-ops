@@ -104,34 +104,73 @@ export async function GET(request: NextRequest) {
     let providerConfig: Record<string, unknown> = {};
 
     if (channel_type === "whatsapp") {
-      const wabaRes = await fetch(
-        `https://graph.facebook.com/v21.0/debug_token?input_token=${accessToken}`,
-        { headers: { Authorization: `Bearer ${metaAppId}|${metaAppSecret}` } }
-      );
-      const wabaData = await wabaRes.json();
-      let phoneNumberId: string | null =
-        wabaData?.data?.granular_scopes?.find(
-          (s: { scope: string }) => s.scope === "whatsapp_business_messaging"
-        )?.target_ids?.[0] ?? null;
-      let wabaId: string | null =
-        wabaData?.data?.granular_scopes?.find(
-          (s: { scope: string }) => s.scope === "whatsapp_business_management"
-        )?.target_ids?.[0] ?? wabaData?.data?.profile_id ?? null;
+      let phoneNumberId: string | null = null;
+      let wabaId: string | null = null;
 
-      // Fallback: si debug_token no devuelve target_ids, obtener WABA y números por API
-      if ((!phoneNumberId || !wabaId) && wabaData?.data?.profile_id) {
-        wabaId = wabaId ?? wabaData.data.profile_id;
-      }
-      if (wabaId && !phoneNumberId) {
-        const phonesRes = await fetch(
-          `https://graph.facebook.com/v21.0/${wabaId}/phone_numbers?access_token=${encodeURIComponent(accessToken)}`
+      // Estrategia 1: debug_token para obtener granular_scopes
+      try {
+        const wabaRes = await fetch(
+          `https://graph.facebook.com/v21.0/debug_token?input_token=${accessToken}`,
+          { headers: { Authorization: `Bearer ${metaAppId}|${metaAppSecret}` } }
         );
-        const phonesData = await phonesRes.json();
-        const firstPhone = phonesData?.data?.[0];
-        if (firstPhone?.id) {
-          phoneNumberId = firstPhone.id;
+        const wabaData = await wabaRes.json();
+        console.info("[Meta Callback] WhatsApp debug_token response:", JSON.stringify(wabaData).substring(0, 500));
+
+        phoneNumberId =
+          wabaData?.data?.granular_scopes?.find(
+            (s: { scope: string }) => s.scope === "whatsapp_business_messaging"
+          )?.target_ids?.[0] ?? null;
+        wabaId =
+          wabaData?.data?.granular_scopes?.find(
+            (s: { scope: string }) => s.scope === "whatsapp_business_management"
+          )?.target_ids?.[0] ?? null;
+      } catch (e) {
+        console.error("[Meta Callback] Error en debug_token:", e);
+      }
+
+      // Estrategia 2: buscar WABAs compartidas con la app
+      if (!wabaId) {
+        try {
+          const bizRes = await fetch(
+            `https://graph.facebook.com/v21.0/me/businesses?access_token=${encodeURIComponent(accessToken)}`
+          );
+          const bizData = await bizRes.json();
+          console.info("[Meta Callback] WhatsApp businesses:", JSON.stringify(bizData).substring(0, 300));
+
+          if (bizData?.data?.[0]?.id) {
+            const bizId = bizData.data[0].id;
+            const wabaListRes = await fetch(
+              `https://graph.facebook.com/v21.0/${bizId}/owned_whatsapp_business_accounts?access_token=${encodeURIComponent(accessToken)}`
+            );
+            const wabaListData = await wabaListRes.json();
+            console.info("[Meta Callback] WhatsApp WABAs:", JSON.stringify(wabaListData).substring(0, 300));
+            if (wabaListData?.data?.[0]?.id) {
+              wabaId = wabaListData.data[0].id;
+            }
+          }
+        } catch (e) {
+          console.error("[Meta Callback] Error buscando WABAs:", e);
         }
       }
+
+      // Estrategia 3: si tenemos wabaId, obtener phone_number_id
+      if (wabaId && !phoneNumberId) {
+        try {
+          const phonesRes = await fetch(
+            `https://graph.facebook.com/v21.0/${wabaId}/phone_numbers?access_token=${encodeURIComponent(accessToken)}`
+          );
+          const phonesData = await phonesRes.json();
+          console.info("[Meta Callback] WhatsApp phones:", JSON.stringify(phonesData).substring(0, 300));
+          const firstPhone = phonesData?.data?.[0];
+          if (firstPhone?.id) {
+            phoneNumberId = firstPhone.id;
+          }
+        } catch (e) {
+          console.error("[Meta Callback] Error obteniendo teléfonos:", e);
+        }
+      }
+
+      console.info("[Meta Callback] WhatsApp result — phone_number_id:", phoneNumberId, "waba_id:", wabaId);
 
       providerConfig = {
         phone_number_id: phoneNumberId,
