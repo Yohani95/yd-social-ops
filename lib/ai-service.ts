@@ -405,13 +405,15 @@ const generatePaymentLinkTool: AITool = {
 
 const captureContactDataTool: AITool = {
   name: "capture_contact_data",
-  description: "Guarda datos del cliente cuando los mencione en la conversacion.",
+  description: "Guarda datos del cliente cuando los mencione en la conversacion (nombre, email, telefono, edad, usuario).",
   parameters: {
     type: "object",
     properties: {
       name: { type: "string", description: "Nombre del cliente si lo menciono" },
       email: { type: "string", description: "Email si lo proporciono" },
       phone: { type: "string", description: "Telefono si lo dio" },
+      age: { type: "number", description: "Edad si la menciono" },
+      username: { type: "string", description: "Usuario o @ de red social si lo dio" },
       intent: {
         type: "string",
         enum: ["buying", "browsing", "support"],
@@ -537,20 +539,32 @@ async function executeCaptureContactData(params: {
   const name = typeof params.payload.name === "string" ? params.payload.name.trim().slice(0, 120) : null;
   const email = normalizeEmail(params.payload.email);
   const phone = normalizePhone(params.payload.phone);
+  const age = typeof params.payload.age === "number" && params.payload.age > 0 && params.payload.age < 150
+    ? params.payload.age
+    : null;
+  const username = typeof params.payload.username === "string" ? params.payload.username.trim().slice(0, 80).replace(/^@/, "") : null;
 
-  if (!name && !email && !phone && !params.payload.intent) {
+  if (!name && !email && !phone && !age && !username && !params.payload.intent) {
     return { ok: false, reason: "no_data" };
   }
+
+  const PROFILE_UPDATE_INTERVAL_DAYS = 90;
 
   try {
     const supabase = createServiceClient();
     const { data: existing } = await supabase
       .from("contacts")
-      .select("id, tags, metadata")
+      .select("id, name, email, phone, tags, metadata, updated_at")
       .eq("tenant_id", params.tenantId)
       .eq("channel", params.channel)
       .eq("identifier", params.identifier)
       .maybeSingle();
+
+    const canUpdateProfile = !existing
+      || (existing.updated_at && (Date.now() - new Date(existing.updated_at).getTime()) > PROFILE_UPDATE_INTERVAL_DAYS * 24 * 60 * 60 * 1000)
+      || (name && !existing.name)
+      || (email && !existing.email)
+      || (phone && !existing.phone);
 
     let canonicalContactId: string | null = null;
     if (phone || email) {
@@ -572,6 +586,8 @@ async function executeCaptureContactData(params: {
         : {}),
     };
     if (params.payload.intent) metadata.last_intent = params.payload.intent;
+    if (canUpdateProfile && age) metadata.age = age;
+    if (canUpdateProfile && username) metadata.username = username;
 
     const existingTags = Array.isArray(existing?.tags)
       ? existing!.tags.filter((t): t is string => typeof t === "string" && !!t.trim())
@@ -580,18 +596,23 @@ async function executeCaptureContactData(params: {
       new Set([...existingTags, ...tagsFromContactIntent(params.payload.intent)].map((t) => t.toLowerCase()))
     ).slice(0, 20);
 
+    const now = new Date().toISOString();
     const upsertData: Record<string, unknown> = {
       id: existing?.id,
       tenant_id: params.tenantId,
       channel: params.channel,
       identifier: params.identifier,
-      name,
-      email,
-      phone,
       tags: mergedTags,
       metadata,
-      last_seen_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      last_seen_at: now,
+      ...(canUpdateProfile
+        ? {
+            name: name ?? existing?.name ?? null,
+            email: email ?? existing?.email ?? null,
+            phone: phone ?? existing?.phone ?? null,
+            updated_at: now,
+          }
+        : {}),
     };
     if (canonicalContactId) {
       upsertData.canonical_contact_id = canonicalContactId;

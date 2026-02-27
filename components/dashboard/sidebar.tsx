@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { useSidebar } from "@/components/dashboard/sidebar-context";
 import type { Tenant } from "@/types";
 
@@ -224,6 +225,9 @@ export function DashboardSidebar({ tenant, userRole }: SidebarProps) {
           className="w-[min(280px,calc(100vw-2rem))] p-0 flex flex-col bg-sidebar border-sidebar-border [&>button]:text-sidebar-foreground [&>button]:hover:text-sidebar-foreground [&>button]:right-4 [&>button]:top-4"
           showCloseButton={true}
         >
+          <VisuallyHidden>
+            <SheetTitle>Menú de navegación</SheetTitle>
+          </VisuallyHidden>
           <SidebarContent
             tenant={tenant}
             userRole={userRole}

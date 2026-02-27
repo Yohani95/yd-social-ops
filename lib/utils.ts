@@ -29,6 +29,23 @@ export function truncate(str: string, maxLength: number): string {
   return str.slice(0, maxLength) + "...";
 }
 
+/** Formatea el identificador del contacto para mostrar al usuario (ej. +56 9 1234 5678 para WhatsApp) */
+export function formatContactIdentifier(identifier: string, channel: string): string {
+  if (!identifier?.trim()) return "—";
+  if (channel === "whatsapp") {
+    const digits = identifier.replace(/\D/g, "");
+    if (digits.length >= 9) {
+      const rest = digits.slice(-9);
+      const country = digits.length > 9 ? `+${digits.slice(0, -9)} ` : "+56 ";
+      return `${country}${rest.slice(0, 1)} ${rest.slice(1, 5)} ${rest.slice(5)}`.trim();
+    }
+  }
+  if (channel === "instagram" || channel === "messenger") {
+    return /^\d+$/.test(identifier) ? `Usuario ${channel}` : identifier;
+  }
+  return identifier;
+}
+
 export function generateSessionId(): string {
   return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }

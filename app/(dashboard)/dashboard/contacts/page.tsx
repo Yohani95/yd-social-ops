@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatContactIdentifier } from "@/lib/utils";
 import { getContacts, getContactConversation, updateContactNotes, updateContactTags, exportContactsCsv } from "@/actions/contacts";
 import type { ChatLog, Contact } from "@/types";
 
@@ -61,8 +61,9 @@ export default function ContactsPage() {
     const q = search.trim().toLowerCase();
     if (!q) return contacts;
 
+    const meta = (c: Contact) => (c.metadata as { username?: string })?.username || "";
     return contacts.filter((c) =>
-      [c.name, c.email, c.phone, c.identifier]
+      [c.name, c.email, c.phone, c.identifier, meta(c)]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(q))
     );
@@ -196,10 +197,10 @@ export default function ContactsPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-bold truncate text-foreground group-hover:text-primary transition-colors">
-                          {contact.name || contact.identifier}
+                          {contact.name || "Sin nombre"}
                         </p>
-                        <p className="text-[11px] text-muted-foreground truncate font-mono mt-0.5">
-                          {contact.email || contact.phone || contact.identifier}
+                        <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                          {contact.email || contact.phone || formatContactIdentifier(contact.identifier, contact.channel)}
                         </p>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
@@ -248,13 +249,26 @@ export default function ContactsPage() {
                 {selectedContact ? (
                   <div className="min-w-0">
                     <CardTitle className="text-lg font-bold truncate">
-                      {selectedContact.name || selectedContact.identifier}
+                      {selectedContact.name || "Sin nombre"}
                     </CardTitle>
-                    <CardDescription className="flex items-center gap-2">
-                      <span className="font-mono text-xs">{selectedContact.identifier}</span>
-                      <span className="text-muted-foreground/20">|</span>
-                      <span className="capitalize">{channelLabels[selectedContact.channel] || selectedContact.channel}</span>
-                    </CardDescription>
+                    <div className="text-sm text-muted-foreground flex flex-col gap-1 mt-1">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                        {selectedContact.email && <span>✉ {selectedContact.email}</span>}
+                        {selectedContact.phone && <span>📞 {selectedContact.phone}</span>}
+                        {!selectedContact.email && !selectedContact.phone && (
+                          <span>{formatContactIdentifier(selectedContact.identifier, selectedContact.channel)}</span>
+                        )}
+                        <span className="capitalize text-muted-foreground/80">
+                          {channelLabels[selectedContact.channel] || selectedContact.channel}
+                        </span>
+                        {(selectedContact.metadata as { age?: number })?.age && (
+                          <span>Edad: {(selectedContact.metadata as { age: number }).age}</span>
+                        )}
+                        {(selectedContact.metadata as { username?: string })?.username && (
+                          <span>@{String((selectedContact.metadata as { username: string }).username || "").replace(/^@/, "")}</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div>

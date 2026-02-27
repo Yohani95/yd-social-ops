@@ -252,6 +252,8 @@ export interface CaptureContactPayload {
   name?: string;
   email?: string;
   phone?: string;
+  age?: number;
+  username?: string;
   intent?: ContactIntent;
 }
 
