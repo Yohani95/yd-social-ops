@@ -230,7 +230,7 @@ export default function ChannelsPage() {
       channelType === "whatsapp"
         ? "whatsapp_business_messaging,whatsapp_business_management"
         : channelType === "instagram"
-          ? "instagram_basic,instagram_manage_messages,pages_show_list"
+          ? "instagram_manage_messages,instagram_basic,pages_manage_metadata,pages_show_list"
           : "pages_messaging,pages_show_list";
 
     const params = new URLSearchParams({
