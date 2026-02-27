@@ -228,7 +228,7 @@ export default function ChannelsPage() {
     const redirectUri = `${appUrl}/api/auth/meta/callback`;
     const scopes =
       channelType === "whatsapp"
-        ? "whatsapp_business_messaging,whatsapp_business_management"
+        ? "whatsapp_business_messaging,whatsapp_business_management,business_management"
         : channelType === "instagram"
           ? "instagram_manage_messages,instagram_basic,pages_manage_metadata,pages_show_list"
           : "pages_messaging,pages_show_list";

@@ -114,7 +114,7 @@ export async function GET(request: NextRequest) {
           { headers: { Authorization: `Bearer ${metaAppId}|${metaAppSecret}` } }
         );
         const wabaData = await wabaRes.json();
-        console.info("[Meta Callback] WhatsApp debug_token response:", JSON.stringify(wabaData).substring(0, 500));
+        console.info("[Meta Callback] WhatsApp granular_scopes:", JSON.stringify(wabaData?.data?.granular_scopes));
 
         phoneNumberId =
           wabaData?.data?.granular_scopes?.find(
