@@ -214,6 +214,14 @@ export async function GET(request: NextRequest) {
       ? (providerConfig.page_access_token as string) || accessToken
       : accessToken;
 
+    // Test API calls to satisfy Meta's permission usage requirements for email and public_profile
+    try {
+      await fetch(`https://graph.facebook.com/v21.0/me?fields=id,name,email&access_token=${accessToken}`);
+      console.info("[Meta OAuth] Tested email & public_profile permissions.");
+    } catch (e) {
+      console.error("[Meta OAuth] Error testing email/public_profile:", e);
+    }
+
     if (channel_type === "messenger" || channel_type === "instagram") {
       const pageId = providerConfig.page_id as string;
       if (pageId && finalAccessToken) {

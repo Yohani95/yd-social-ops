@@ -71,16 +71,21 @@ export class MessengerAdapter implements ChannelAdapter {
 
     const url = "https://graph.facebook.com/v21.0/me/messages";
 
+    let messaging_type = "RESPONSE";
+    let tag: string | undefined = undefined;
+
+    const bodyToSend: Record<string, any> = {
+      recipient: { id: to },
+      message: { text: this.formatMessage(message) },
+      access_token: accessToken,
+    };
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        recipient: { id: to },
-        message: { text: this.formatMessage(message) },
-        access_token: accessToken,
-      }),
+      body: JSON.stringify(bodyToSend),
     });
 
     if (!response.ok) {

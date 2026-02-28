@@ -306,8 +306,12 @@ DECLARE
   new_tenant_id UUID;
 BEGIN
   -- Crear el tenant
-  INSERT INTO tenants (email, name)
-  VALUES (NEW.email, COALESCE(NEW.raw_user_meta_data->>'name', ''))
+  INSERT INTO tenants (email, name, business_name)
+  VALUES (
+    NEW.email, 
+    COALESCE(NEW.raw_user_meta_data->>'name', ''),
+    COALESCE(NEW.raw_user_meta_data->>'business_name', '')
+  )
   RETURNING id INTO new_tenant_id;
 
   -- Crear la relación tenant_users como owner
@@ -316,7 +320,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Trigger que crea tenant automáticamente al registrarse
 CREATE OR REPLACE TRIGGER on_auth_user_created

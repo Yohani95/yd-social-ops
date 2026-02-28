@@ -198,9 +198,10 @@ async function processAndReply(
     message: message || "",
   });
 
+  const adapter = getAdapter(channelType);
+
   const rateLimit = checkAIRateLimit(channel.tenant_id);
   if (!rateLimit.allowed) {
-    const adapter = getAdapter(channelType);
     await adapter.sendReply(
       senderId,
       "Estamos recibiendo muchos mensajes. Intenta nuevamente en un momento.",
@@ -217,7 +218,6 @@ async function processAndReply(
     channel: channelType,
   });
 
-  const adapter = getAdapter(channelType);
   const formattedMessage = adapter.formatMessage(response.message);
   await adapter.sendReply(senderId, formattedMessage, channel);
 }
