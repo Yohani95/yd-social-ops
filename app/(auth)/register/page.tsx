@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Bot, Mail, Lock, User, Loader2, Building2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,17 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 
-export default function RegisterPage() {
+function sanitizeNextPath(value: string | null): string {
+  if (!value) return "/dashboard";
+  if (!value.startsWith("/")) return "/dashboard";
+  if (value.startsWith("//")) return "/dashboard";
+  return value;
+}
+
+function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = sanitizeNextPath(searchParams.get("next"));
   const [form, setForm] = useState({
     name: "",
     businessName: "",
@@ -64,7 +73,7 @@ export default function RegisterPage() {
     }
 
     toast.success("¡Cuenta creada! Revisa tu email para confirmar tu registro.");
-    router.push("/login");
+    router.push(`/login?next=${encodeURIComponent(nextPath)}`);
   }
 
   return (
@@ -213,7 +222,7 @@ export default function RegisterPage() {
               <p className="text-sm text-muted-foreground text-center">
                 ¿Ya tienes cuenta?{" "}
                 <Link
-                  href="/login"
+                  href={`/login?next=${encodeURIComponent(nextPath)}`}
                   className="text-primary hover:underline font-medium"
                 >
                   Iniciar sesión
@@ -224,5 +233,17 @@ export default function RegisterPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+      </div>
+    }>
+      <RegisterForm />
+    </Suspense>
   );
 }

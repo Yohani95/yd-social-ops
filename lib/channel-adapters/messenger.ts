@@ -9,6 +9,34 @@ import type { ChannelAdapter, ParsedMessage } from "./index";
  * entry[].messaging[].sender.id + entry[].messaging[].message.text
  */
 export class MessengerAdapter implements ChannelAdapter {
+  private extractAudioUrl(
+    attachments: Array<{
+      type?: string;
+      mime_type?: string;
+      payload?: { url?: string; src?: string; mime_type?: string };
+    }> | undefined
+  ): string | null {
+    if (!attachments?.length) return null;
+
+    for (const attachment of attachments) {
+      const type = (attachment.type || "").toLowerCase();
+      const mimeType = (attachment.mime_type || attachment.payload?.mime_type || "").toLowerCase();
+      const url = attachment.payload?.url || attachment.payload?.src || "";
+
+      if (!url) continue;
+
+      const isAudioType = type === "audio";
+      const isAudioMime = mimeType.startsWith("audio/");
+      const isAudioByExtension = /\.(ogg|mp3|wav|m4a|aac|webm)(\?|$)/i.test(url);
+
+      if (isAudioType || isAudioMime || isAudioByExtension) {
+        return url;
+      }
+    }
+
+    return null;
+  }
+
   parseIncoming(body: unknown): ParsedMessage | null {
     try {
       const data = body as {
@@ -19,7 +47,11 @@ export class MessengerAdapter implements ChannelAdapter {
             message?: {
               text?: string;
               mid?: string;
-              attachments?: Array<{ type?: string; payload?: { url?: string } }>;
+              attachments?: Array<{
+                type?: string;
+                mime_type?: string;
+                payload?: { url?: string; src?: string; mime_type?: string };
+              }>;
             };
           }>;
         }>;
@@ -42,8 +74,8 @@ export class MessengerAdapter implements ChannelAdapter {
         };
       }
 
-      const audioAtt = msg?.attachments?.find((a) => a.type === "audio");
-      if (audioAtt?.payload?.url) {
+      const audioUrl = this.extractAudioUrl(msg?.attachments);
+      if (audioUrl) {
         return {
           senderId: messaging.sender.id,
           message: "",
@@ -51,7 +83,7 @@ export class MessengerAdapter implements ChannelAdapter {
             page_id: entry?.id,
             message_id: msg?.mid,
           },
-          audioUrl: audioAtt.payload.url,
+          audioUrl,
         };
       }
 
@@ -71,10 +103,7 @@ export class MessengerAdapter implements ChannelAdapter {
 
     const url = "https://graph.facebook.com/v21.0/me/messages";
 
-    let messaging_type = "RESPONSE";
-    let tag: string | undefined = undefined;
-
-    const bodyToSend: Record<string, any> = {
+    const bodyToSend = {
       recipient: { id: to },
       message: { text: this.formatMessage(message) },
       access_token: accessToken,

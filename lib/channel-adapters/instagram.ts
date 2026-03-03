@@ -9,6 +9,34 @@ import type { ChannelAdapter, ParsedMessage } from "./index";
  * Envío: POST /me/messages con el token (Page/Instagram) igual que Messenger.
  */
 export class InstagramAdapter implements ChannelAdapter {
+  private extractAudioUrl(
+    attachments: Array<{
+      type?: string;
+      mime_type?: string;
+      payload?: { url?: string; src?: string; mime_type?: string };
+    }> | undefined
+  ): string | null {
+    if (!attachments?.length) return null;
+
+    for (const attachment of attachments) {
+      const type = (attachment.type || "").toLowerCase();
+      const mimeType = (attachment.mime_type || attachment.payload?.mime_type || "").toLowerCase();
+      const url = attachment.payload?.url || attachment.payload?.src || "";
+
+      if (!url) continue;
+
+      const isAudioType = type === "audio";
+      const isAudioMime = mimeType.startsWith("audio/");
+      const isAudioByExtension = /\.(ogg|mp3|wav|m4a|aac|webm)(\?|$)/i.test(url);
+
+      if (isAudioType || isAudioMime || isAudioByExtension) {
+        return url;
+      }
+    }
+
+    return null;
+  }
+
   parseIncoming(body: unknown): ParsedMessage | null {
     try {
       const data = body as {
@@ -20,7 +48,11 @@ export class InstagramAdapter implements ChannelAdapter {
             message?: {
               text?: string;
               mid?: string;
-              attachments?: Array<{ type?: string; payload?: { url?: string } }>;
+              attachments?: Array<{
+                type?: string;
+                mime_type?: string;
+                payload?: { url?: string; src?: string; mime_type?: string };
+              }>;
             };
           }>;
         }>;
@@ -45,8 +77,8 @@ export class InstagramAdapter implements ChannelAdapter {
         };
       }
 
-      const audioAtt = msg?.attachments?.find((a) => a.type === "audio");
-      if (audioAtt?.payload?.url) {
+      const audioUrl = this.extractAudioUrl(msg?.attachments);
+      if (audioUrl) {
         return {
           senderId: messaging.sender.id,
           message: "",
@@ -54,7 +86,7 @@ export class InstagramAdapter implements ChannelAdapter {
             ig_account_id: entry?.id,
             message_id: msg?.mid,
           },
-          audioUrl: audioAtt.payload.url,
+          audioUrl,
         };
       }
 

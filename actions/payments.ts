@@ -1,24 +1,25 @@
 "use server";
 
-import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { getMPClient, getSaaSMPClient, Preference } from "@/lib/mercadopago";
+import { createServiceClient } from "@/lib/supabase/server";
+import { getMPClient, Preference } from "@/lib/mercadopago";
 import { updateStock } from "@/actions/products";
 import { getAppUrl } from "@/lib/app-url";
 import type { ActionResult, CreatePreferenceInput } from "@/types";
 
 /**
- * Crea una preferencia de pago de Mercado Pago usando el token DEL TENANT.
- * Usado cuando el bot detecta intención de compra (Plan Pro/Enterprise).
+ * Crea una preferencia de pago usando la configuracion del tenant.
+ * - mp_oauth: crea preferencia en la cuenta MP del tenant.
+ * - external_link: retorna el link global configurado por el tenant.
+ * - bank_transfer: no soporta pago automatico.
  */
 export async function createPreference(
   input: CreatePreferenceInput
 ): Promise<ActionResult<{ init_point: string; preference_id: string }>> {
   const supabase = createServiceClient();
 
-  // Obtener tenant con sus tokens MP
   const { data: tenant, error: tenantError } = await supabase
     .from("tenants")
-    .select("id, mp_access_token, plan_tier, saas_subscription_status")
+    .select("id, mp_access_token, plan_tier, saas_subscription_status, merchant_checkout_mode, merchant_external_checkout_url")
     .eq("id", input.tenant_id)
     .single();
 
@@ -26,18 +27,42 @@ export async function createPreference(
     return { success: false, error: "Tenant no encontrado" };
   }
 
-  if (tenant.plan_tier === "basic") {
-    return { success: false, error: "El Plan Básico no soporta pagos automáticos" };
+  const checkoutMode = tenant.merchant_checkout_mode || "bank_transfer";
+  const planAllowsMPOAuth = tenant.plan_tier !== "basic";
+
+  if (checkoutMode === "external_link") {
+    const link = tenant.merchant_external_checkout_url?.trim();
+    if (!link) {
+      return { success: false, error: "El link externo no esta configurado en Ajustes." };
+    }
+
+    return {
+      success: true,
+      data: {
+        init_point: link,
+        preference_id: "external_link",
+      },
+    };
+  }
+
+  if (checkoutMode !== "mp_oauth") {
+    return { success: false, error: "El modo de pago automatico no esta habilitado para este negocio." };
+  }
+
+  if (!planAllowsMPOAuth) {
+    return {
+      success: false,
+      error: "El plan Basico no soporta OAuth de Mercado Pago. Usa link externo o transferencia.",
+    };
   }
 
   if (!tenant.mp_access_token) {
     return {
       success: false,
-      error: "Mercado Pago no está conectado. Configúralo en Ajustes.",
+      error: "Mercado Pago no esta conectado. Configuralo en Ajustes.",
     };
   }
 
-  // Obtener producto
   const { data: product, error: productError } = await supabase
     .from("products")
     .select("id, name, price, stock, is_active")
@@ -50,7 +75,7 @@ export async function createPreference(
   }
 
   if (!product.is_active) {
-    return { success: false, error: "El producto no está disponible" };
+    return { success: false, error: "El producto no esta disponible" };
   }
 
   const quantity = input.quantity || 1;
@@ -63,10 +88,8 @@ export async function createPreference(
   }
 
   try {
-    // Crear preferencia con el token DEL TENANT
     const mpClient = getMPClient(tenant.mp_access_token);
     const preference = new Preference(mpClient);
-
     const appUrl = getAppUrl();
 
     const result = await preference.create({
@@ -92,7 +115,6 @@ export async function createPreference(
           product_id: input.product_id,
           quantity,
         },
-        // marketplace_fee: 0, // Descomentar para cobrar comisión de marketplace en el futuro
       },
     });
 
@@ -111,14 +133,13 @@ export async function createPreference(
     console.error("[Payments] Error creando preferencia:", error);
     return {
       success: false,
-      error: "Error al conectar con Mercado Pago. Intenta más tarde.",
+      error: "Error al conectar con Mercado Pago. Intenta mas tarde.",
     };
   }
 }
 
 /**
  * Procesa un pago aprobado: descuenta stock y registra en logs.
- * Llamado desde el webhook de pago del tenant.
  */
 export async function processApprovedPayment(params: {
   tenant_id: string;
@@ -126,7 +147,6 @@ export async function processApprovedPayment(params: {
   quantity: number;
   payment_id: string;
 }): Promise<ActionResult> {
-  // Descontar stock
   const stockResult = await updateStock(params.product_id, -params.quantity);
   if (!stockResult.success) {
     console.error("[Payments] Error descontando stock:", stockResult.error);
@@ -136,25 +156,24 @@ export async function processApprovedPayment(params: {
 }
 
 /**
- * Crea un link de suscripción del SaaS (usando TU cuenta de MP).
- * Retorna la URL para que el cliente pague tu servicio.
+ * Link publico de planes SaaS (fallback comercial).
  */
 export async function getSaaSSubscriptionLink(
-  planTier: "basic" | "pro" | "enterprise"
+  planTier: "basic" | "pro" | "business" | "enterprise" | "enterprise_plus"
 ): Promise<ActionResult<{ url: string }>> {
   const planLinks: Record<string, string> = {
-    // Configura estos links en tu dashboard de Mercado Pago
-    // Como Links de Pago recurrentes o planes de suscripción
     basic: process.env.MP_PLAN_BASIC_LINK || "",
     pro: process.env.MP_PLAN_PRO_LINK || "",
+    business: process.env.MP_PLAN_BUSINESS_LINK || "",
     enterprise: process.env.MP_PLAN_ENTERPRISE_LINK || "",
+    enterprise_plus: process.env.MP_PLAN_ENTERPRISE_PLUS_LINK || "",
   };
 
   const link = planLinks[planTier];
   if (!link) {
     return {
       success: false,
-      error: "Link de suscripción no configurado para este plan",
+      error: "Link de suscripcion no configurado para este plan",
     };
   }
 

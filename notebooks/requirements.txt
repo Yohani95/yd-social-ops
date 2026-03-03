@@ -1,0 +1,7 @@
+# Dependencias para notebooks de análisis (YD Social Ops)
+jupyterlab>=4.0
+ipykernel>=6.0
+supabase>=2.0
+pandas>=2.0
+matplotlib>=3.7
+python-dotenv>=1.0

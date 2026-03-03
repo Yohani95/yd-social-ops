@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getMPClient, Preference } from "@/lib/mercadopago";
 import { getAppUrl } from "@/lib/app-url";
+import { createMerchantPaymentLink } from "@/lib/merchant-payment-links";
 import { notifyN8n } from "@/lib/integrations/n8n";
 import { callAI, callAIWithToolResult, type AIMessage, type AITool } from "@/lib/ai-providers";
 import { sendWelcomeEmail, sendOwnerNewMessageAlertEmail } from "@/lib/email";
@@ -306,6 +307,7 @@ function buildToneInstructions(tone: string): string {
 
 function buildContactInstructions(tenant: Tenant): string {
   const contactAction = tenant.contact_action || "payment_link";
+  const checkoutMode = tenant.merchant_checkout_mode || "bank_transfer";
   const isServicesBusiness = tenant.business_type === "services";
   const servicesRules = isServicesBusiness
     ? `
@@ -340,11 +342,14 @@ REGLAS PARA RESERVAS (SERVICIOS):
     }
     case "payment_link":
     default: {
+      const planAllowsMPOAuth = tenant.plan_tier !== "basic";
       const usePaymentTool =
-        (tenant.plan_tier === "pro" || tenant.plan_tier === "enterprise") &&
+        checkoutMode === "mp_oauth" &&
+        planAllowsMPOAuth &&
         !!tenant.mp_access_token;
 
       if (usePaymentTool) {
+        const adHocMode = tenant.merchant_ad_hoc_link_mode || "approval";
         return `METODO DE PAGO (AUTOMATICO):
 Cuando un cliente quiera comprar:
 1. Confirma que producto/servicio quiere y la cantidad.
@@ -352,12 +357,28 @@ Cuando un cliente quiera comprar:
 3. Llama a la funcion "generate_payment_link" con el product_id correspondiente.
 4. El sistema generara automaticamente un link de pago seguro.
 - SIEMPRE usa la funcion generate_payment_link, no inventes URLs.
-- Si no hay stock, informa amablemente y ofrece alternativas.${servicesRules}`;
+- Si no hay stock, informa amablemente y ofrece alternativas.
+- Si el cliente pide un cobro extra/reserva con monto personalizado (no catalogo), usa "generate_custom_payment_link".
+- Modo ad-hoc actual del tenant: ${adHocMode}.${servicesRules}`;
+      }
+
+      if (checkoutMode === "external_link" && tenant.merchant_external_checkout_url?.trim()) {
+        const adHocMode = tenant.merchant_ad_hoc_link_mode || "approval";
+        return `METODO DE PAGO (LINK EXTERNO):
+Cuando un cliente quiera comprar:
+1. Confirma producto/servicio y cantidad.
+2. Comparte este link de pago: ${tenant.merchant_external_checkout_url.trim()}
+3. Pide al cliente enviar comprobante por este mismo chat si corresponde.
+- NO generes links nuevos ni inventes URLs.
+- Si no hay stock/disponibilidad, informa y ofrece alternativas.
+- Si el cliente pide un cobro extra/reserva con monto personalizado (fuera del catalogo), usa "generate_custom_payment_link".
+- Modo ad-hoc actual del tenant: ${adHocMode}.${servicesRules}`;
       }
 
       const bankDetails =
         tenant.bank_details?.trim() ||
         "Datos bancarios no configurados. Indica al cliente que contacte directamente al negocio para concretar el pago.";
+      const adHocMode = tenant.merchant_ad_hoc_link_mode || "approval";
 
       return `METODO DE PAGO (TRANSFERENCIA BANCARIA):
 Los links de pago automaticos NO estan disponibles. Tu UNICA opcion es compartir los datos de transferencia.
@@ -371,7 +392,9 @@ DATOS DE TRANSFERENCIA (copiar integramente en tu respuesta):
 ${bankDetails}
 
 - Indica al cliente que envie el comprobante por este mismo chat o WhatsApp.
-- NO ofrezcas links de pago ni menciones Mercado Pago (no esta disponible).${servicesRules}`;
+- NO ofrezcas links de pago de producto ni menciones Mercado Pago automatico (no esta disponible para catalogo).
+- Si el cliente pide un cobro extra/reserva con monto personalizado, usa "generate_custom_payment_link".
+- Modo ad-hoc actual del tenant: ${adHocMode}.${servicesRules}`;
     }
   }
 }
@@ -403,6 +426,37 @@ const generatePaymentLinkTool: AITool = {
   },
 };
 
+const generateCustomPaymentLinkTool: AITool = {
+  name: "generate_custom_payment_link",
+  description:
+    "Genera (o solicita) un link de pago ad-hoc para reservas o cobros extra con monto personalizado.",
+  parameters: {
+    type: "object",
+    properties: {
+      title: {
+        type: "string",
+        description: "Titulo del cobro. Ejemplo: Reserva de mesa o Adicional de servicio.",
+      },
+      amount_clp: {
+        type: "number",
+        description: "Monto total en CLP.",
+      },
+      description: {
+        type: "string",
+        description: "Descripcion opcional del cobro.",
+      },
+      expires_minutes: {
+        type: "number",
+        description: "Minutos de vigencia del link.",
+      },
+      customer_ref: {
+        type: "string",
+        description: "Referencia del cliente (nombre, rut o codigo interno).",
+      },
+    },
+  },
+};
+
 const captureContactDataTool: AITool = {
   name: "capture_contact_data",
   description: "Guarda datos del cliente cuando los mencione en la conversacion (nombre, email, telefono, edad, usuario).",
@@ -428,7 +482,12 @@ const captureContactDataTool: AITool = {
 async function executeGeneratePaymentLink(
   args: { product_id?: string; product_name?: string; quantity?: number },
   tenant: Tenant,
-  products: Product[]
+  products: Product[],
+  requestContext?: {
+    sessionId?: string;
+    userIdentifier?: string;
+    channel?: string;
+  }
 ): Promise<{ link: string; product_name: string; product_id: string } | { error: string }> {
   let product: Product | undefined;
   if (args.product_id) {
@@ -446,10 +505,30 @@ async function executeGeneratePaymentLink(
 
   const quantity = args.quantity || 1;
 
-  if (product.stock < quantity) {
+  const requiresStrictStock = product.item_type === "product";
+  const hasLimitedServiceCapacity = product.item_type === "service" && product.stock > 0;
+  if ((requiresStrictStock || hasLimitedServiceCapacity) && product.stock < quantity) {
     return {
       error: `Solo hay ${product.stock} unidades disponibles de "${product.name}".`,
     };
+  }
+
+  const checkoutMode = tenant.merchant_checkout_mode || "bank_transfer";
+
+  if (checkoutMode === "external_link") {
+    const link = tenant.merchant_external_checkout_url?.trim();
+    if (!link) {
+      return { error: "El link externo de pago no está configurado." };
+    }
+    return {
+      link,
+      product_name: product.name,
+      product_id: product.id,
+    };
+  }
+
+  if (checkoutMode !== "mp_oauth") {
+    return { error: "El pago automático no está habilitado para este negocio." };
   }
 
   if (!tenant.mp_access_token) {
@@ -460,6 +539,10 @@ async function executeGeneratePaymentLink(
     const mpClient = getMPClient(tenant.mp_access_token);
     const preference = new Preference(mpClient);
     const appUrl = getAppUrl();
+    const sessionRef = (requestContext?.sessionId || "").trim().slice(0, 120) || null;
+    const userRef = (requestContext?.userIdentifier || "").trim().slice(0, 120) || null;
+    const channelRef = (requestContext?.channel || "").trim().slice(0, 32) || null;
+    const externalReference = sessionRef || userRef || undefined;
 
     const result = await preference.create({
       body: {
@@ -479,10 +562,14 @@ async function executeGeneratePaymentLink(
         },
         auto_return: "approved",
         notification_url: `${appUrl}/api/webhooks/payment?tenant_id=${tenant.id}`,
+        external_reference: externalReference,
         metadata: {
           tenant_id: tenant.id,
           product_id: product.id,
           quantity,
+          session_ref: sessionRef,
+          user_ref: userRef,
+          channel: channelRef,
         },
       },
     });
@@ -496,6 +583,81 @@ async function executeGeneratePaymentLink(
     console.error("[AI Service] Error generando preferencia MP:", error);
     return { error: "No se pudo generar el link de pago. Intenta mas tarde." };
   }
+}
+
+async function executeGenerateCustomPaymentLink(params: {
+  tenant: Tenant;
+  args: {
+    title?: string;
+    amount_clp?: number;
+    description?: string;
+    expires_minutes?: number;
+    customer_ref?: string;
+  };
+  requestContext: {
+    channel: string;
+    userIdentifier?: string;
+  };
+}): Promise<
+  | { link?: string; status: string; message: string; id?: string }
+  | { error: string }
+> {
+  const title = String(params.args.title || "").trim();
+  const amount = Number(params.args.amount_clp || 0);
+  if (!title) {
+    return { error: "Debes indicar un titulo para el cobro personalizado." };
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { error: "Debes indicar un monto valido para el cobro personalizado." };
+  }
+
+  const channel =
+    params.requestContext.channel === "web" ||
+    params.requestContext.channel === "whatsapp" ||
+    params.requestContext.channel === "messenger" ||
+    params.requestContext.channel === "instagram" ||
+    params.requestContext.channel === "tiktok"
+      ? params.requestContext.channel
+      : "web";
+
+  const result = await createMerchantPaymentLink({
+    tenantId: params.tenant.id,
+    title,
+    description: params.args.description,
+    amountClp: amount,
+    quantity: 1,
+    channel,
+    customerRef: params.args.customer_ref || params.requestContext.userIdentifier || undefined,
+    expiresMinutes: params.args.expires_minutes,
+    createdBy: "bot",
+  });
+
+  if (!result.ok || !result.link) {
+    return { error: result.error || "No se pudo crear la solicitud de cobro personalizado." };
+  }
+
+  if (result.link.status === "created" && result.link.mp_init_point) {
+    return {
+      id: result.link.id,
+      link: result.link.mp_init_point,
+      status: result.link.status,
+      message: "Link personalizado creado y listo para compartir.",
+    };
+  }
+
+  if (result.link.status === "pending_approval") {
+    return {
+      id: result.link.id,
+      status: result.link.status,
+      message: "Solicitud creada. Un agente debe aprobar el link antes de compartirlo.",
+    };
+  }
+
+  return {
+    id: result.link.id,
+    status: result.link.status,
+    message: "Solicitud de cobro creada en modo manual. Un agente enviara el link.",
+  };
 }
 
 function normalizeEmail(email: unknown): string | null {
@@ -789,6 +951,129 @@ async function getChatHistory(
   return history;
 }
 
+interface ApprovedPaymentMatch {
+  paymentId: string;
+  amount: number;
+  currency: string;
+  productId?: string | null;
+  processedAt?: string | null;
+}
+
+function shouldCheckPaidStatus(message: string): boolean {
+  const lower = message.toLowerCase();
+  const patterns = [
+    /ya\s+pague/i,
+    /ya\s+pagu[eé]/i,
+    /listo\s+ya\s+lo\s+pague/i,
+    /pago\s+realizado/i,
+    /se\s+acredit[oó]/i,
+    /puedes\s+comprobar\s+si\s+lo\s+pague/i,
+    /verifica(r)?\s+mi\s+pago/i,
+    /rev(isa|isar)\s+mi\s+pago/i,
+  ];
+  return patterns.some((pattern) => pattern.test(lower));
+}
+
+function extractPaymentMetadata(rawPayload: unknown): Record<string, unknown> {
+  if (!rawPayload || typeof rawPayload !== "object") return {};
+  const root = rawPayload as Record<string, unknown>;
+  const payment = root.payment;
+  if (!payment || typeof payment !== "object") return {};
+  const metadata = (payment as Record<string, unknown>).metadata;
+  if (!metadata || typeof metadata !== "object") return {};
+  return metadata as Record<string, unknown>;
+}
+
+function parsePaymentMatch(raw: {
+  payment_id?: string | null;
+  amount?: number | string | null;
+  currency?: string | null;
+  product_id?: string | null;
+  processed_at?: string | null;
+}): ApprovedPaymentMatch | null {
+  const paymentId = typeof raw.payment_id === "string" ? raw.payment_id : null;
+  if (!paymentId) return null;
+  const amountNum = Number(raw.amount || 0);
+  if (!Number.isFinite(amountNum)) return null;
+  return {
+    paymentId,
+    amount: amountNum,
+    currency: typeof raw.currency === "string" && raw.currency.trim() ? raw.currency : "CLP",
+    productId: raw.product_id || null,
+    processedAt: raw.processed_at || null,
+  };
+}
+
+function formatApprovedAmount(amount: number, currency: string): string {
+  const normalizedCurrency = (currency || "CLP").toUpperCase();
+  if (normalizedCurrency === "CLP") {
+    return `$${Math.round(amount).toLocaleString("es-CL")} CLP`;
+  }
+  return `${amount.toLocaleString("es-CL")} ${normalizedCurrency}`;
+}
+
+async function findRecentApprovedPaymentForConversation(params: {
+  tenantId: string;
+  sessionId?: string;
+  userIdentifier?: string;
+}): Promise<ApprovedPaymentMatch | null> {
+  const supabase = createServiceClient();
+
+  const { data: recentEvents } = await supabase
+    .from("payment_events")
+    .select("payment_id, amount, currency, product_id, processed_at, created_at, raw_payload")
+    .eq("tenant_id", params.tenantId)
+    .eq("status", "approved")
+    .eq("processed", true)
+    .order("created_at", { ascending: false })
+    .limit(40);
+
+  if (!recentEvents || recentEvents.length === 0) return null;
+
+  const now = Date.now();
+  const recentRows = recentEvents.filter((row) => {
+    const createdMs = Date.parse(String(row.created_at || ""));
+    if (Number.isNaN(createdMs)) return false;
+    return now - createdMs <= 24 * 60 * 60 * 1000;
+  });
+
+  for (const row of recentRows) {
+    const metadata = extractPaymentMetadata(row.raw_payload);
+    const sessionRef = typeof metadata.session_ref === "string" ? metadata.session_ref : null;
+    const userRef = typeof metadata.user_ref === "string" ? metadata.user_ref : null;
+    const bySession = !!params.sessionId && !!sessionRef && params.sessionId === sessionRef;
+    const byUser = !!params.userIdentifier && !!userRef && params.userIdentifier === userRef;
+    if (!bySession && !byUser) continue;
+    const parsed = parsePaymentMatch(row);
+    if (parsed) return parsed;
+  }
+
+  if (!params.sessionId) return null;
+
+  const { data: latestSessionLink } = await supabase
+    .from("chat_logs")
+    .select("product_id, created_at")
+    .eq("tenant_id", params.tenantId)
+    .eq("session_id", params.sessionId)
+    .not("payment_link", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const productId = typeof latestSessionLink?.product_id === "string" ? latestSessionLink.product_id : null;
+  const linkCreatedMs = Date.parse(String(latestSessionLink?.created_at || ""));
+  if (!productId || Number.isNaN(linkCreatedMs)) return null;
+
+  const matchedByProduct = recentRows.find((row) => {
+    if (row.product_id !== productId) return false;
+    const createdMs = Date.parse(String(row.created_at || ""));
+    if (Number.isNaN(createdMs)) return false;
+    return createdMs >= linkCreatedMs - 5 * 60 * 1000;
+  });
+
+  return matchedByProduct ? parsePaymentMatch(matchedByProduct) : null;
+}
+
 // ============================================================
 // MAIN FUNCTION: processMessage
 // ============================================================
@@ -809,11 +1094,61 @@ export async function processMessage(
     };
   }
 
+  if (shouldCheckPaidStatus(sanitizedUserMessage)) {
+    const approvedPayment = await findRecentApprovedPaymentForConversation({
+      tenantId: tenant_id,
+      sessionId: request.session_id,
+      userIdentifier: request.user_identifier,
+    });
+
+    if (approvedPayment) {
+      const paidAmount = formatApprovedAmount(approvedPayment.amount, approvedPayment.currency);
+      const confirmationMessage = `Si, tu pago ya fue acreditado correctamente. Operacion #${approvedPayment.paymentId} por ${paidAmount}.`;
+      const confirmationIntent: BotResponse["intent_detected"] = "purchase_intent";
+
+      await saveChatLog({
+        tenant_id,
+        user_message: rawUserMessage,
+        bot_response: confirmationMessage,
+        intent_detected: confirmationIntent,
+        product_id: approvedPayment.productId || undefined,
+        payment_link: undefined,
+        session_id: request.session_id,
+        user_identifier: request.user_identifier,
+        channel: request.channel || "web",
+        tokens_used: 0,
+      });
+
+      await upsertContactIntentTag({
+        tenantId: tenant_id,
+        channel: request.channel || "web",
+        identifier: request.user_identifier || request.session_id,
+        intent: confirmationIntent,
+      });
+
+      await upsertConversationMemory({
+        tenantId: tenant_id,
+        sessionId: request.session_id,
+        userMessage: rawUserMessage,
+        botMessage: confirmationMessage,
+        intent: confirmationIntent,
+      });
+
+      return {
+        message: confirmationMessage,
+        intent_detected: confirmationIntent,
+        product_id: approvedPayment.productId || undefined,
+      };
+    }
+  }
+
   const systemPrompt = buildSystemPrompt(tenant, products, mcpServers);
-  const usePaymentTools =
+  const useCatalogPaymentTool =
     (tenant.contact_action || "payment_link") === "payment_link" &&
-    (tenant.plan_tier === "pro" || tenant.plan_tier === "enterprise") &&
+    tenant.merchant_checkout_mode === "mp_oauth" &&
+    tenant.plan_tier !== "basic" &&
     !!tenant.mp_access_token;
+  const useCustomPaymentTool = (tenant.contact_action || "payment_link") === "payment_link";
 
   const historyLimit = parseInt(
     process.env.AI_CHAT_HISTORY_LIMIT || "10",
@@ -837,7 +1172,12 @@ export async function processMessage(
   ];
 
   const tools: AITool[] = [];
-  if (usePaymentTools) tools.push(generatePaymentLinkTool);
+  if (useCatalogPaymentTool) {
+    tools.push(generatePaymentLinkTool);
+  }
+  if (useCustomPaymentTool) {
+    tools.push(generateCustomPaymentLinkTool);
+  }
   if (request.user_identifier || request.session_id) tools.push(captureContactDataTool);
 
   let aiResponse = await callAI(messages, tools.length > 0 ? tools : undefined);
@@ -852,7 +1192,12 @@ export async function processMessage(
         const result = await executeGeneratePaymentLink(
           toolCall.arguments as { product_id?: string; product_name?: string; quantity?: number },
           tenant,
-          products
+          products,
+          {
+            sessionId: request.session_id,
+            userIdentifier: request.user_identifier,
+            channel: request.channel || "web",
+          }
         );
 
         let toolResultContent: string;
@@ -866,6 +1211,48 @@ export async function processMessage(
             payment_link: result.link,
             product_name: result.product_name,
             message: "Link de pago generado exitosamente",
+          });
+        }
+
+        aiResponse = await callAIWithToolResult(
+          messages,
+          aiResponse.provider,
+          toolCall.id,
+          toolCall.name,
+          toolResultContent,
+          undefined,
+          aiResponse.modelUsed
+        );
+      }
+
+      if (toolCall.name === "generate_custom_payment_link") {
+        const result = await executeGenerateCustomPaymentLink({
+          tenant,
+          args: toolCall.arguments as {
+            title?: string;
+            amount_clp?: number;
+            description?: string;
+            expires_minutes?: number;
+            customer_ref?: string;
+          },
+          requestContext: {
+            channel: request.channel || "web",
+            userIdentifier: request.user_identifier || request.session_id,
+          },
+        });
+
+        let toolResultContent: string;
+        if ("error" in result) {
+          toolResultContent = `Error: ${result.error}`;
+        } else {
+          if (result.link) {
+            paymentLink = result.link;
+          }
+          toolResultContent = JSON.stringify({
+            payment_link: result.link || null,
+            merchant_payment_link_id: result.id || null,
+            status: result.status,
+            message: result.message,
           });
         }
 
@@ -990,9 +1377,22 @@ export async function processMessage(
 function sanitizeBotResponse(text: string): string {
   if (!text?.trim()) return text;
   let out = text;
+  const protectedUrls: string[] = [];
+  out = out.replace(/https?:\/\/[^\s)]+/gi, (match) => {
+    const token = `__URL_PROTECTED_${protectedUrls.length}__`;
+    protectedUrls.push(match);
+    return token;
+  });
+  // Evita filtrar pseudo tool-calls del modelo al usuario final.
+  out = out.replace(/<function=[^>]+>[\s\S]*?<\/function>/gi, "");
+  out = out.replace(/<function=[^>]+>[\s\S]*$/gi, "");
   out = out.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "");
   out = out.replace(/\s*\(ID:\s*[^)]+\)/g, "");
   out = out.replace(/\s*\|?\s*ID:\s*[^\s|]+/g, "");
+  out = out.replace(/__URL_PROTECTED_(\d+)__/g, (_m, idx) => {
+    const position = Number(idx);
+    return Number.isInteger(position) && protectedUrls[position] ? protectedUrls[position] : "";
+  });
   return out.replace(/\n{3,}/g, "\n\n").replace(/\s{2,}/g, " ").trim();
 }
 

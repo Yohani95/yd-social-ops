@@ -8,6 +8,7 @@ import {
   Package,
   Settings,
   MessageSquare,
+  Inbox,
   Users,
   Share2,
   Crown,
@@ -36,6 +37,7 @@ const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Setup", href: "/dashboard/setup", icon: Wand2, badge: "Nuevo" },
   { label: "Productos", href: "/dashboard/products", icon: Package },
+  { label: "Bandeja", href: "/dashboard/inbox", icon: Inbox },
   { label: "Chat Logs", href: "/dashboard/chat-logs", icon: MessageSquare },
   { label: "Contactos", href: "/dashboard/contacts", icon: Users },
   {
@@ -137,7 +139,8 @@ function SidebarContent({ tenant, userRole, onNavigate }: SidebarContentProps) {
           const isLocked =
             item.requiredPlan &&
             plan !== item.requiredPlan &&
-            !(item.requiredPlan === "pro" && plan === "enterprise");
+            !(item.requiredPlan === "pro" && ["enterprise", "enterprise_plus"].includes(plan)) &&
+            !(item.requiredPlan === "enterprise" && plan === "enterprise_plus");
 
           const Icon = item.icon;
 
@@ -188,7 +191,7 @@ function SidebarContent({ tenant, userRole, onNavigate }: SidebarContentProps) {
                   : "Inactivo"}
             </p>
           </div>
-          {plan !== "enterprise" && (
+          {!["enterprise", "enterprise_plus"].includes(plan) && (
             <Link
               href="/pricing"
               onClick={onNavigate}

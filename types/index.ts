@@ -11,6 +11,8 @@ export type ContactAction = "payment_link" | "whatsapp_contact" | "email_contact
 export type BotTone = "formal" | "informal" | "amigable";
 export type ItemType = "product" | "service" | "info";
 export type AvailabilityType = "stock" | "calendar" | "quota";
+export type MerchantCheckoutMode = "mp_oauth" | "external_link" | "bank_transfer";
+export type MerchantAdHocLinkMode = "manual" | "approval" | "automatic";
 export type IntentType =
   | "purchase_intent"
   | "inquiry"
@@ -31,6 +33,12 @@ export interface Tenant {
   saas_subscription_status: SubscriptionStatus;
   saas_subscription_id: string | null;
   trial_ends_at: string | null;
+  saas_trial_consumed_at: string | null;
+  saas_trial_consumed_plan_tier: PlanTier | null;
+  pending_plan_tier: PlanTier | null;
+  pending_plan_effective_at: string | null;
+  pending_plan_requested_at: string | null;
+  pending_plan_source: "owner_request" | "system" | null;
   // Plan Básico
   bank_details: string | null;
   // Plan Pro
@@ -52,6 +60,11 @@ export interface Tenant {
   contact_whatsapp: string | null;
   contact_email: string | null;
   contact_custom_message: string | null;
+  merchant_checkout_mode: MerchantCheckoutMode;
+  merchant_external_checkout_url: string | null;
+  merchant_ad_hoc_link_mode: MerchantAdHocLinkMode;
+  merchant_ad_hoc_max_amount_clp: number;
+  merchant_ad_hoc_expiry_minutes: number;
   // Bot
   bot_name: string;
   bot_welcome_message: string;
@@ -73,6 +86,11 @@ export type TenantUpdate = Partial<
     | "contact_whatsapp"
     | "contact_email"
     | "contact_custom_message"
+    | "merchant_checkout_mode"
+    | "merchant_external_checkout_url"
+    | "merchant_ad_hoc_link_mode"
+    | "merchant_ad_hoc_max_amount_clp"
+    | "merchant_ad_hoc_expiry_minutes"
     | "bank_details"
     | "bot_name"
     | "bot_welcome_message"
@@ -274,6 +292,150 @@ export interface PaymentEvent {
   raw_payload: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+}
+
+export interface SaasSubscription {
+  id: string;
+  tenant_id: string;
+  mp_preapproval_id: string;
+  plan_tier: PlanTier;
+  status: string;
+  payer_email: string | null;
+  external_reference: string | null;
+  started_at: string | null;
+  next_billing_date: string | null;
+  canceled_at: string | null;
+  raw_last_payload: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SaasBillingEvent {
+  id: string;
+  event_topic: string;
+  event_resource_id: string;
+  tenant_id: string | null;
+  payload: Record<string, unknown>;
+  processed: boolean;
+  processed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PlanChangeType = "upgrade" | "downgrade" | "same_plan_blocked";
+export type PlanChangeStatus = "requested" | "scheduled" | "applied" | "cancelled" | "failed";
+
+export interface TenantPlanChange {
+  id: string;
+  tenant_id: string;
+  from_plan_tier: PlanTier;
+  to_plan_tier: PlanTier;
+  change_type: PlanChangeType;
+  status: PlanChangeStatus;
+  effective_at: string | null;
+  mp_old_preapproval_id: string | null;
+  mp_new_preapproval_id: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export type MerchantPaymentLinkStatus =
+  | "draft"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "created"
+  | "paid"
+  | "expired"
+  | "cancelled"
+  | "failed";
+
+export type MerchantPaymentLinkCreatedBy = "bot" | "agent" | "owner" | "api";
+
+export interface MerchantPaymentLink {
+  id: string;
+  tenant_id: string;
+  channel: ChatChannel | null;
+  thread_id: string | null;
+  contact_id: string | null;
+  created_by: MerchantPaymentLinkCreatedBy;
+  mode_used: MerchantAdHocLinkMode;
+  title: string;
+  description: string | null;
+  amount_clp: number;
+  quantity: number;
+  expires_at: string | null;
+  status: MerchantPaymentLinkStatus;
+  mp_preference_id: string | null;
+  mp_init_point: string | null;
+  metadata: Record<string, unknown>;
+  payment_event_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ThreadStatus = "open" | "pending" | "closed";
+export type MessageDirection = "inbound" | "outbound";
+export type MessageAuthorType = "customer" | "bot" | "agent";
+
+export interface ConversationThread {
+  id: string;
+  tenant_id: string;
+  channel: ChatChannel;
+  user_identifier: string;
+  contact_id: string | null;
+  status: ThreadStatus;
+  last_message_at: string;
+  unread_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationMessage {
+  id: string;
+  thread_id: string;
+  tenant_id: string;
+  direction: MessageDirection;
+  author_type: MessageAuthorType;
+  content: string;
+  provider_message_id: string | null;
+  raw_payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface OffsetPagination {
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  next_offset: number | null;
+}
+
+export interface ThreadListResponse {
+  data: ConversationThread[];
+  pagination: OffsetPagination;
+}
+
+export interface ThreadMessagesResponse {
+  data: {
+    thread: ConversationThread;
+    messages: ConversationMessage[];
+  };
+  pagination: OffsetPagination;
+}
+
+export type ArchivedDataset = "chat_logs" | "conversation_messages";
+
+export interface DataArchiveManifest {
+  id: string;
+  tenant_id: string;
+  dataset: ArchivedDataset;
+  from_date: string;
+  to_date: string;
+  file_path: string;
+  rows_count: number;
+  checksum: string | null;
+  created_at: string;
 }
 
 // ============================================================

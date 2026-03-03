@@ -116,14 +116,6 @@ const plans: PlanInfo[] = [
   },
 ];
 
-const planLinks: Record<string, string> = {
-  basic: process.env.MP_PLAN_BASIC_LINK || "/register",
-  pro: process.env.MP_PLAN_PRO_LINK || "/register",
-  business: process.env.MP_PLAN_BUSINESS_LINK || "/register",
-  enterprise: process.env.MP_PLAN_ENTERPRISE_LINK || "/register",
-  enterprise_plus: process.env.MP_PLAN_ENTERPRISE_PLUS_LINK || "/register",
-};
-
 function formatCLP(amount: number): string {
   return new Intl.NumberFormat("es-CL", {
     style: "currency",
@@ -195,7 +187,7 @@ export default function PricingPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
           {plans.map((plan) => {
             const Icon = planIcons[plan.id];
-            const link = planLinks[plan.id] || "/register";
+            const subscribePath = `/subscribe?plan=${plan.id}`;
 
             return (
               <Card
@@ -269,7 +261,7 @@ export default function PricingPage() {
                 </CardContent>
 
                 <CardFooter className="pt-6">
-                  <a href={link} target="_blank" rel="noopener noreferrer" className="w-full">
+                  <Link href={subscribePath} className="w-full">
                     <Button
                       className="w-full"
                       variant={plan.highlighted ? "default" : "outline"}
@@ -278,7 +270,7 @@ export default function PricingPage() {
                       Suscribirse al Plan {plan.name}
                       <ArrowRight className="w-4 h-4" />
                     </Button>
-                  </a>
+                  </Link>
                 </CardFooter>
               </Card>
             );

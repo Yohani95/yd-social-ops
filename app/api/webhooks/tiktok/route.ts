@@ -4,7 +4,17 @@ import { processMessage } from "@/lib/ai-service";
 import { checkAIRateLimit } from "@/lib/rate-limit";
 import { getAdapter } from "@/lib/channel-adapters";
 import { notifyOwnerOnFirstExternalMessage } from "@/lib/owner-alerts";
+import { ensureContactExists } from "@/lib/contacts";
+import { recordInboundThreadMessage, recordOutboundThreadMessage } from "@/lib/inbox";
 import type { BotRequest, SocialChannel } from "@/types";
+
+function composeOutboundMessage(baseMessage: string, paymentLink?: string | null): string {
+  const messageText = (baseMessage || "").trim();
+  const link = (paymentLink || "").trim();
+  if (!link) return messageText;
+  if (messageText.includes(link)) return messageText;
+  return `${messageText}\n\nLink de pago: ${link}`;
+}
 
 /**
  * POST /api/webhooks/tiktok
@@ -42,6 +52,20 @@ export async function POST(request: NextRequest) {
         || ch.channel_identifier === parsed.senderId
     ) || channels[0] as SocialChannel;
 
+    await ensureContactExists({
+      tenantId: channel.tenant_id,
+      channel: "tiktok",
+      identifier: parsed.senderId,
+    });
+
+    await recordInboundThreadMessage({
+      tenantId: channel.tenant_id,
+      channel: "tiktok",
+      userIdentifier: parsed.senderId,
+      content: parsed.message,
+      rawPayload: body,
+    });
+
     await notifyOwnerOnFirstExternalMessage({
       tenantId: channel.tenant_id,
       channel: "tiktok",
@@ -51,11 +75,17 @@ export async function POST(request: NextRequest) {
 
     const rateLimit = checkAIRateLimit(channel.tenant_id);
     if (!rateLimit.allowed) {
-      await adapter.sendReply(
-        parsed.senderId,
-        "Estamos recibiendo muchos mensajes. Intenta nuevamente en un momento.",
-        channel
-      );
+      const rateLimitMessage = "Estamos recibiendo muchos mensajes. Intenta nuevamente en un momento.";
+      await adapter.sendReply(parsed.senderId, rateLimitMessage, channel);
+      await recordOutboundThreadMessage({
+        tenantId: channel.tenant_id,
+        channel: "tiktok",
+        userIdentifier: parsed.senderId,
+        content: rateLimitMessage,
+        authorType: "bot",
+        resetUnread: true,
+        rawPayload: { source: "tiktok", rate_limited: true },
+      });
       return NextResponse.json({ status: "rate_limited" }, { status: 200 });
     }
 
@@ -69,8 +99,24 @@ export async function POST(request: NextRequest) {
 
     const response = await processMessage(botRequest);
 
-    const formattedMessage = adapter.formatMessage(response.message);
+    const outboundMessage = composeOutboundMessage(response.message, response.payment_link);
+    const formattedMessage = adapter.formatMessage(outboundMessage);
     await adapter.sendReply(parsed.senderId, formattedMessage, channel);
+
+    await recordOutboundThreadMessage({
+      tenantId: channel.tenant_id,
+      channel: "tiktok",
+      userIdentifier: parsed.senderId,
+      content: formattedMessage,
+      authorType: "bot",
+      resetUnread: true,
+      rawPayload: {
+        source: "tiktok",
+        intent: response.intent_detected || null,
+        product_id: response.product_id || null,
+        payment_link: response.payment_link || null,
+      },
+    });
 
     return NextResponse.json({ status: "ok" }, { status: 200 });
   } catch (error) {

@@ -9,6 +9,7 @@ import {
   getMetaMediaUrl,
   transcribeAudioFromUrl,
 } from "@/lib/audio-transcription";
+import { recordInboundThreadMessage, recordOutboundThreadMessage } from "@/lib/inbox";
 import type { SocialChannel, ChatChannel } from "@/types";
 import type { ParsedMessage } from "@/lib/channel-adapters";
 
@@ -161,6 +162,14 @@ async function processAndReply(
   channelType: ChatChannel,
   parsed: ParsedMessage
 ) {
+  const composeOutboundMessage = (baseMessage: string, paymentLink?: string | null): string => {
+    const messageText = (baseMessage || "").trim();
+    const link = (paymentLink || "").trim();
+    if (!link) return messageText;
+    if (messageText.includes(link)) return messageText;
+    return `${messageText}\n\nLink de pago: ${link}`;
+  };
+
   const { senderId } = parsed;
   let message = parsed.message;
 
@@ -173,7 +182,7 @@ async function processAndReply(
         audioUrl = parsed.audioUrl;
       }
       if (audioUrl) {
-        message = await transcribeAudioFromUrl(audioUrl);
+        message = await transcribeAudioFromUrl(audioUrl, channel.access_token as string | undefined);
       }
     } catch (err) {
       console.warn("[Meta Webhook] Error transcribiendo audio:", err);
@@ -191,6 +200,21 @@ async function processAndReply(
     identifier: senderId,
   });
 
+  await recordInboundThreadMessage({
+    tenantId: channel.tenant_id,
+    channel: channelType,
+    userIdentifier: senderId,
+    content: message || "",
+    providerMessageId: typeof parsed.metadata?.message_id === "string" ? parsed.metadata.message_id : null,
+    rawPayload: {
+      source: "meta",
+      channel: channelType,
+      metadata: parsed.metadata || {},
+      audio_media_id: parsed.audioMediaId || null,
+      audio_url: parsed.audioUrl || null,
+    },
+  });
+
   await notifyOwnerOnFirstExternalMessage({
     tenantId: channel.tenant_id,
     channel: channelType,
@@ -202,11 +226,17 @@ async function processAndReply(
 
   const rateLimit = checkAIRateLimit(channel.tenant_id);
   if (!rateLimit.allowed) {
-    await adapter.sendReply(
-      senderId,
-      "Estamos recibiendo muchos mensajes. Intenta nuevamente en un momento.",
-      channel
-    );
+    const rateLimitMessage = "Estamos recibiendo muchos mensajes. Intenta nuevamente en un momento.";
+    await adapter.sendReply(senderId, rateLimitMessage, channel);
+    await recordOutboundThreadMessage({
+      tenantId: channel.tenant_id,
+      channel: channelType,
+      userIdentifier: senderId,
+      content: rateLimitMessage,
+      authorType: "bot",
+      resetUnread: true,
+      rawPayload: { source: "meta", rate_limited: true },
+    });
     return;
   }
 
@@ -218,6 +248,22 @@ async function processAndReply(
     channel: channelType,
   });
 
-  const formattedMessage = adapter.formatMessage(response.message);
+  const outboundMessage = composeOutboundMessage(response.message, response.payment_link);
+  const formattedMessage = adapter.formatMessage(outboundMessage);
   await adapter.sendReply(senderId, formattedMessage, channel);
+
+  await recordOutboundThreadMessage({
+    tenantId: channel.tenant_id,
+    channel: channelType,
+    userIdentifier: senderId,
+    content: formattedMessage,
+    authorType: "bot",
+    resetUnread: true,
+    rawPayload: {
+      source: "meta",
+      intent: response.intent_detected || null,
+      product_id: response.product_id || null,
+      payment_link: response.payment_link || null,
+    },
+  });
 }

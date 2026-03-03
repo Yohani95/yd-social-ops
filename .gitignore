@@ -27,7 +27,7 @@ yarn-error.log*
 .vscode
 *.swp
 *.swo
-
+.claude
 # OS
 .DS_Store
 Thumbs.db
@@ -45,3 +45,4 @@ coverage
 
 # Misc
 *.pem
+.local-secrets/

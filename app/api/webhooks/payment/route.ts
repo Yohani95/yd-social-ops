@@ -2,16 +2,128 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getMPClient, Payment } from "@/lib/mercadopago";
+import { markMerchantPaymentLinkPaid } from "@/lib/merchant-payment-links";
 import { notifyN8n } from "@/lib/integrations/n8n";
 import { sendPaymentConfirmationEmail } from "@/lib/email";
+import { getAdapter } from "@/lib/channel-adapters";
+import { getActiveChannelConfig, recordOutboundThreadMessage } from "@/lib/inbox";
+import type { ChatChannel } from "@/types";
 
 interface MPPaymentData {
   id?: string | number;
   status?: string;
+  external_reference?: string;
   metadata?: Record<string, unknown>;
   payer?: { email?: string };
   transaction_amount?: number;
   currency_id?: string;
+}
+
+const CHANNEL_PREFIXES: ChatChannel[] = ["whatsapp", "messenger", "instagram", "tiktok", "web"];
+
+function asTrimmedString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function formatAmount(amount: number, currency: string): string {
+  const normalizedCurrency = (currency || "CLP").toUpperCase();
+  if (normalizedCurrency === "CLP") {
+    return `$${Math.round(amount).toLocaleString("es-CL")} CLP`;
+  }
+  return `${amount.toLocaleString("es-CL")} ${normalizedCurrency}`;
+}
+
+function resolveConversationTarget(params: {
+  metadata: Record<string, unknown>;
+  externalReference?: string | null;
+}): { channel: ChatChannel | null; userIdentifier: string | null; sessionRef: string | null } {
+  const rawChannel = asTrimmedString(params.metadata.channel);
+  const rawUserRef = asTrimmedString(params.metadata.user_ref);
+  const rawSessionRef = asTrimmedString(params.metadata.session_ref) || asTrimmedString(params.externalReference);
+
+  let channel: ChatChannel | null =
+    rawChannel && CHANNEL_PREFIXES.includes(rawChannel as ChatChannel)
+      ? (rawChannel as ChatChannel)
+      : null;
+  let userIdentifier: string | null = rawUserRef;
+
+  if (!channel && rawSessionRef) {
+    const inferred = CHANNEL_PREFIXES.find((prefix) => rawSessionRef.startsWith(`${prefix}_`));
+    if (inferred) {
+      channel = inferred;
+    }
+  }
+
+  if (!userIdentifier && rawSessionRef && channel && rawSessionRef.startsWith(`${channel}_`)) {
+    userIdentifier = rawSessionRef.slice(`${channel}_`.length) || null;
+  }
+
+  if (!userIdentifier && rawSessionRef && channel && channel !== "web") {
+    userIdentifier = rawSessionRef;
+  }
+
+  return {
+    channel,
+    userIdentifier,
+    sessionRef: rawSessionRef,
+  };
+}
+
+async function notifyApprovedPaymentInConversation(params: {
+  tenantId: string;
+  productName: string;
+  paymentId: string;
+  amount: number;
+  currency: string;
+  metadata: Record<string, unknown>;
+  externalReference?: string | null;
+}): Promise<void> {
+  const target = resolveConversationTarget({
+    metadata: params.metadata,
+    externalReference: params.externalReference,
+  });
+
+  if (!target.channel || target.channel === "web" || !target.userIdentifier) {
+    return;
+  }
+
+  const channelConfig = await getActiveChannelConfig({
+    tenantId: params.tenantId,
+    channel: target.channel,
+  });
+  if (!channelConfig) return;
+
+  const amountLabel = formatAmount(params.amount, params.currency);
+  const message = `Pago acreditado correctamente. Operacion #${params.paymentId} por ${amountLabel} (${params.productName}).`;
+
+  try {
+    const adapter = getAdapter(target.channel);
+    const formattedMessage = adapter.formatMessage(message);
+    await adapter.sendReply(target.userIdentifier, formattedMessage, channelConfig);
+    await recordOutboundThreadMessage({
+      tenantId: params.tenantId,
+      channel: target.channel,
+      userIdentifier: target.userIdentifier,
+      content: formattedMessage,
+      authorType: "bot",
+      resetUnread: true,
+      rawPayload: {
+        source: "payment_webhook",
+        event: "payment_approved",
+        payment_id: params.paymentId,
+      },
+    });
+  } catch (error) {
+    console.warn("[Payment Webhook] could not send proactive payment confirmation", {
+      tenant_id: params.tenantId,
+      channel: target.channel,
+      user_identifier: target.userIdentifier,
+      payment_id: params.paymentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function parseSignature(signature: string): { ts?: string; v1?: string } {
@@ -75,14 +187,18 @@ export async function POST(request: NextRequest) {
 
     const signatureHeader = request.headers.get("x-signature");
     const requestId = request.headers.get("x-request-id");
-    if (signatureHeader && requestId && process.env.MP_WEBHOOK_SECRET) {
+    if (process.env.MP_WEBHOOK_SECRET) {
+      if (!signatureHeader || !requestId) {
+        console.warn("[Payment Webhook] missing signature headers payment=%s", paymentId);
+        return NextResponse.json({ error: "missing_signature" }, { status: 401 });
+      }
       const valid = validateMPSignature({
         signatureHeader,
         requestId,
         dataId: paymentId,
       });
       if (!valid) {
-        console.warn("[Payment Webhook] invalid signature");
+        console.warn("[Payment Webhook] invalid signature payment=%s", paymentId);
         return NextResponse.json({ error: "invalid_signature" }, { status: 401 });
       }
     }
@@ -96,7 +212,7 @@ export async function POST(request: NextRequest) {
     const supabase = createServiceClient();
     const { data: tenant } = await supabase
       .from("tenants")
-      .select("id, business_name, mp_access_token")
+      .select("id, email, business_name, mp_access_token")
       .eq("id", tenantId)
       .single();
 
@@ -130,14 +246,34 @@ export async function POST(request: NextRequest) {
     }
 
     const status = String(payment.status || "unknown");
+    const externalReference =
+      typeof payment.external_reference === "string"
+        ? payment.external_reference
+        : null;
     const productId = typeof metadata.product_id === "string" ? metadata.product_id : null;
+    const merchantPaymentLinkId =
+      typeof metadata.merchant_payment_link_id === "string"
+        ? metadata.merchant_payment_link_id
+        : null;
     const quantityRaw = Number(metadata.quantity || 1);
     const quantity = Number.isFinite(quantityRaw) ? Math.max(1, Math.round(quantityRaw)) : 1;
     const payerEmail = payment.payer?.email?.trim() || null;
     const amount = Number(payment.transaction_amount || 0);
     const currency = payment.currency_id || "CLP";
+    const enrichedRawPayload = {
+      webhook: payload,
+      payment: {
+        id: String(payment.id),
+        status,
+        external_reference: externalReference,
+        metadata,
+        payer_email: payerEmail,
+        transaction_amount: amount,
+        currency_id: currency,
+      },
+    };
 
-    await supabase
+    const { data: pendingEvent } = await supabase
       .from("payment_events")
       .upsert(
         {
@@ -149,12 +285,14 @@ export async function POST(request: NextRequest) {
           payer_email: payerEmail,
           amount,
           currency,
-          raw_payload: payload,
+          raw_payload: enrichedRawPayload,
           processed: false,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "tenant_id,payment_id" }
-      );
+      )
+      .select("id")
+      .single();
 
     if (status !== "approved") {
       return NextResponse.json({ received: true, status });
@@ -166,29 +304,35 @@ export async function POST(request: NextRequest) {
     if (productId) {
       const { data: product } = await supabase
         .from("products")
-        .select("id, name, stock")
+        .select("id, name")
         .eq("id", productId)
         .eq("tenant_id", tenantId)
         .single();
 
       if (product) {
         productName = product.name || productName;
-        const nextStock = Math.max(0, Number(product.stock || 0) - quantity);
-        const { error: stockError } = await supabase
-          .from("products")
-          .update({ stock: nextStock, updated_at: new Date().toISOString() })
-          .eq("id", productId)
-          .eq("tenant_id", tenantId);
-
-        stockUpdated = !stockError;
+        const { data: decremented, error: stockError } = await supabase.rpc("decrement_stock", {
+          p_product_id: productId,
+          p_tenant_id: tenantId,
+          p_quantity: quantity,
+        });
+        stockUpdated = !stockError && decremented === true;
       }
     }
 
+    const notificationRecipients = Array.from(
+      new Set(
+        [payerEmail, typeof tenant.email === "string" ? tenant.email.trim() : null].filter(
+          (value): value is string => Boolean(value)
+        )
+      )
+    );
+
     let emailSent = false;
-    if (payerEmail) {
+    for (const recipient of notificationRecipients) {
       const emailResult = await sendPaymentConfirmationEmail({
         tenantId,
-        to: payerEmail,
+        to: recipient,
         businessName: tenant.business_name || "Tu negocio",
         productName,
         quantity,
@@ -196,10 +340,19 @@ export async function POST(request: NextRequest) {
         currency,
         paymentId: String(payment.id),
       });
-      emailSent = emailResult.ok;
+      if (emailResult.ok) {
+        emailSent = true;
+      } else {
+        console.warn("[Payment Webhook] email send failed", {
+          tenant_id: tenantId,
+          payment_id: String(payment.id),
+          recipient,
+          reason: emailResult.reason || "unknown",
+        });
+      }
     }
 
-    await supabase
+    const { data: processedEvent } = await supabase
       .from("payment_events")
       .upsert(
         {
@@ -211,7 +364,7 @@ export async function POST(request: NextRequest) {
           payer_email: payerEmail,
           amount,
           currency,
-          raw_payload: payload,
+          raw_payload: enrichedRawPayload,
           stock_updated: stockUpdated,
           email_sent: emailSent,
           processed: true,
@@ -219,7 +372,30 @@ export async function POST(request: NextRequest) {
           updated_at: new Date().toISOString(),
         },
         { onConflict: "tenant_id,payment_id" }
-      );
+      )
+      .select("id")
+      .single();
+
+    if (merchantPaymentLinkId) {
+      await markMerchantPaymentLinkPaid({
+        tenantId,
+        linkId: merchantPaymentLinkId,
+        paymentEventId:
+          (typeof processedEvent?.id === "string" && processedEvent.id) ||
+          (typeof pendingEvent?.id === "string" && pendingEvent.id) ||
+          null,
+      });
+    }
+
+    await notifyApprovedPaymentInConversation({
+      tenantId,
+      productName,
+      paymentId: String(payment.id),
+      amount,
+      currency,
+      metadata,
+      externalReference,
+    });
 
     void notifyN8n("payment_approved", {
       tenant_id: tenantId,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processMessage } from "@/lib/ai-service";
 import { checkAIRateLimit } from "@/lib/rate-limit";
+import { recordInboundThreadMessage, recordOutboundThreadMessage } from "@/lib/inbox";
 import type { BotRequest } from "@/types";
 
 /**
@@ -28,8 +29,11 @@ export async function POST(
 
     const body = await request.json();
     const { message, session_id, user_identifier, channel } = body;
+    const normalizedMessage = typeof message === "string" ? message.trim() : "";
+    const channelType = (channel || "web") as BotRequest["channel"];
+    const inboxUserIdentifier = String(user_identifier || session_id || "web_anonymous");
 
-    if (!message || typeof message !== "string" || message.trim() === "") {
+    if (!normalizedMessage) {
       return NextResponse.json(
         { error: "El campo 'message' es requerido y no puede estar vacío" },
         { status: 400 }
@@ -55,13 +59,35 @@ export async function POST(
 
     const botRequest: BotRequest = {
       tenant_id,
-      user_message: message.trim(),
+      user_message: normalizedMessage,
       session_id: session_id || undefined,
       user_identifier: user_identifier || undefined,
-      channel: channel || "web",
+      channel: channelType,
     };
 
+    await recordInboundThreadMessage({
+      tenantId: tenant_id,
+      channel: channelType || "web",
+      userIdentifier: inboxUserIdentifier,
+      content: normalizedMessage,
+      rawPayload: body,
+    });
+
     const response = await processMessage(botRequest);
+
+    await recordOutboundThreadMessage({
+      tenantId: tenant_id,
+      channel: channelType || "web",
+      userIdentifier: inboxUserIdentifier,
+      content: response.message,
+      authorType: "bot",
+      resetUnread: true,
+      rawPayload: {
+        intent: response.intent_detected || null,
+        product_id: response.product_id || null,
+        payment_link: response.payment_link || null,
+      },
+    });
 
     return NextResponse.json({
       success: true,

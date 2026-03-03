@@ -129,7 +129,9 @@ const CHANNEL_INFO: Record<
 const PLAN_LIMITS: Record<string, { web: boolean; external: number }> = {
   basic: { web: true, external: 0 },
   pro: { web: true, external: 1 },
+  business: { web: true, external: 3 },
   enterprise: { web: true, external: 99 },
+  enterprise_plus: { web: true, external: 99 },
 };
 
 export default function ChannelsPage() {
@@ -141,6 +143,8 @@ export default function ChannelsPage() {
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
   const [whatsappPhones, setWhatsappPhones] = useState<Record<string, Array<{ id: string; display_phone_number: string }>>>({});
   const [selectedPhoneId, setSelectedPhoneId] = useState<Record<string, string>>({});
+  const [metaTestTargets, setMetaTestTargets] = useState<Record<string, string>>({});
+  const [testingChannelId, setTestingChannelId] = useState<string | null>(null);
 
   const plan = tenant?.plan_tier || "basic";
   const limits = PLAN_LIMITS[plan] || PLAN_LIMITS.basic;
@@ -250,6 +254,44 @@ export default function ChannelsPage() {
     window.location.href = `https://www.facebook.com/v21.0/dialog/oauth?${params.toString()}`;
   }
 
+  async function runMetaPermissionTest(channel: SocialChannel) {
+    const isWhatsApp = channel.channel_type === "whatsapp";
+    const isMessenger = channel.channel_type === "messenger";
+    const isInstagram = channel.channel_type === "instagram";
+
+    if (!isWhatsApp && !isMessenger && !isInstagram) return;
+
+    const target = metaTestTargets[channel.id]?.trim() || "";
+    if ((isWhatsApp || isMessenger) && !target) {
+      toast.error(isWhatsApp ? "Ingresa numero de prueba (ej: 569...)." : "Ingresa user ID de prueba de Messenger.");
+      return;
+    }
+
+    const endpoint = isWhatsApp
+      ? `/api/channels/test-whatsapp-permissions?channelId=${channel.id}&testPhone=${encodeURIComponent(target)}`
+      : isMessenger
+        ? `/api/channels/test-messenger-permissions?channelId=${channel.id}&testPhone=${encodeURIComponent(target)}`
+        : `/api/channels/test-ig-permissions?channelId=${channel.id}`;
+
+    setTestingChannelId(channel.id);
+    try {
+      const res = await fetch(endpoint, { method: "GET" });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "No se pudo ejecutar la prueba de Meta.");
+        return;
+      }
+      toast.success(data.message || "Prueba de Meta ejecutada.");
+      const nextChannels = await getChannels();
+      setChannels(nextChannels);
+    } catch (error) {
+      console.error(error);
+      toast.error("No se pudo ejecutar la prueba de Meta.");
+    } finally {
+      setTestingChannelId(null);
+    }
+  }
+
   if (channels === undefined) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -294,7 +336,7 @@ export default function ChannelsPage() {
             Plan <Badge variant="secondary" className="capitalize mx-1">{plan}</Badge>
             — Web {limits.web ? "✓" : "✗"} · Canales: {externalChannels.length}/{limits.external === 99 ? "∞" : limits.external}
           </span>
-          {plan !== "enterprise" && (
+          {!["enterprise", "enterprise_plus"].includes(plan) && (
             <Badge variant="outline" className="cursor-pointer shrink-0" onClick={() => window.location.href = "/pricing"}>
               Upgrade
             </Badge>
@@ -337,6 +379,19 @@ export default function ChannelsPage() {
                 : chType === "tiktok"
                   ? `${appUrl}/api/webhooks/tiktok`
                   : ch.webhook_url;
+            const metaReviewKey =
+              chType === "whatsapp"
+                ? "whatsapp_permissions"
+                : chType === "messenger"
+                  ? "messenger_permissions"
+                  : chType === "instagram"
+                    ? "instagram_permissions"
+                    : null;
+            const metaReviewData = metaReviewKey
+              ? ((((ch.config as Record<string, unknown> | undefined)?.meta_review as Record<string, unknown> | undefined)?.[metaReviewKey]) as
+                | { last_test_at?: string; success?: boolean }
+                | undefined)
+              : undefined;
 
             return (
               <Card key={ch.id} className={!ch.is_active ? "opacity-60" : ""}>
@@ -590,6 +645,49 @@ export default function ChannelsPage() {
                             Suscribir Webhook
                           </Button>
                         )}
+
+                        {metaReviewKey && (
+                          <div className="space-y-2 rounded-md border border-dashed p-3">
+                            <p className="text-xs font-medium text-muted-foreground">
+                              App Review Meta: ejecutar prueba de permisos
+                            </p>
+                            {(ch.channel_type === "whatsapp" || ch.channel_type === "messenger") && (
+                              <Input
+                                value={metaTestTargets[ch.id] || ""}
+                                onChange={(e) =>
+                                  setMetaTestTargets((prev) => ({ ...prev, [ch.id]: e.target.value }))
+                                }
+                                placeholder={ch.channel_type === "whatsapp" ? "Numero prueba (569...)" : "User ID de Messenger"}
+                                className="h-8 text-xs"
+                              />
+                            )}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={testingChannelId === ch.id}
+                                onClick={() => void runMetaPermissionTest(ch)}
+                              >
+                                {testingChannelId === ch.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
+                                ) : (
+                                  <RefreshCw className="w-3.5 h-3.5 mr-1" />
+                                )}
+                                Ejecutar prueba Meta
+                              </Button>
+                              {metaReviewData?.last_test_at ? (
+                                <Badge variant={metaReviewData.success ? "success" : "warning"}>
+                                  {metaReviewData.success ? "Ultima prueba OK" : "Ultima prueba con error"}:{" "}
+                                  {new Date(metaReviewData.last_test_at).toLocaleString("es-CL")}
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary">Sin evidencia guardada</Badge>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
                         <p className="text-xs text-muted-foreground break-words">
                           {ch.access_token
                             ? ch.channel_type === "whatsapp"

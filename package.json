@@ -6,7 +6,10 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint .",
+    "mp:plans:reset": "node scripts/mp-plans-reset.mjs",
+    "mp:validate-env": "node scripts/mp-validate-env.mjs --env=.env.local",
+    "mp:plans:backurl": "node scripts/mp-update-plan-backurls.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.42.0",

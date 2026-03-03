@@ -11,10 +11,17 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 
+function sanitizeNextPath(value: string | null): string {
+  if (!value) return "/dashboard";
+  if (!value.startsWith("/")) return "/dashboard";
+  if (value.startsWith("//")) return "/dashboard";
+  return value;
+}
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next") || "/dashboard";
+  const nextPath = sanitizeNextPath(searchParams.get("next"));
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -120,7 +127,7 @@ function LoginForm() {
               <p className="text-sm text-muted-foreground text-center">
                 ¿No tienes cuenta?{" "}
                 <Link
-                  href="/register"
+                  href={`/register?next=${encodeURIComponent(nextPath)}`}
                   className="text-primary hover:underline font-medium"
                 >
                   Regístrate gratis
