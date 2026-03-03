@@ -4,9 +4,7 @@ import { getAppUrl } from "@/lib/app-url";
 import { createMerchantPaymentLink } from "@/lib/merchant-payment-links";
 import { notifyN8n } from "@/lib/integrations/n8n";
 import { callAI, callAIWithToolResult, type AIMessage, type AITool } from "@/lib/ai-providers";
-
-import { sendWelcomeEmail } from "@/lib/email";
-
+import { sendWelcomeEmail, sendOwnerNewMessageAlertEmail } from "@/lib/email";
 import type { BotRequest, BotResponse, CaptureContactPayload, Product, Tenant } from "@/types";
 
 type IndustryTemplate =
