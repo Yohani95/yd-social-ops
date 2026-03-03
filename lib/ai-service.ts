@@ -359,7 +359,14 @@ Cuando un cliente quiera comprar:
 - SIEMPRE usa la funcion generate_payment_link, no inventes URLs.
 - Si no hay stock, informa amablemente y ofrece alternativas.
 - Si el cliente pide un cobro extra/reserva con monto personalizado (no catalogo), usa "generate_custom_payment_link".
-- Modo ad-hoc actual del tenant: ${adHocMode}.${servicesRules}`;
+- Modo ad-hoc actual del tenant: ${adHocMode}.
+
+DESPUES DE GENERAR UN LINK DE PAGO:
+- Si recibes un link (URL), compartelo directamente al cliente sin modificarlo. Se natural y amigable.
+- Si el estado es "pending_approval", informa que la solicitud fue recibida y esta en revision por el negocio.
+- Si hubo un error, disculpate y sugiere alternativas como intentar de nuevo o contactar directamente.
+- NUNCA inventes URLs de pago. Solo comparte las que el sistema te proporciona.
+- NUNCA repitas informacion tecnica como IDs, estados internos o nombres de funciones.${servicesRules}`;
       }
 
       if (checkoutMode === "external_link" && tenant.merchant_external_checkout_url?.trim()) {
@@ -1203,15 +1210,11 @@ export async function processMessage(
         let toolResultContent: string;
 
         if ("error" in result) {
-          toolResultContent = `Error: ${result.error}`;
+          toolResultContent = `Error al generar el link de pago: ${result.error}. INSTRUCCIONES: Disculpate con el cliente, explica brevemente que hubo un problema tecnico al crear el link de pago, y sugiere que intente nuevamente en unos minutos o contacte directamente al negocio.`;
         } else {
           paymentLink = result.link;
           detectedProductId = result.product_id;
-          toolResultContent = JSON.stringify({
-            payment_link: result.link,
-            product_name: result.product_name,
-            message: "Link de pago generado exitosamente",
-          });
+          toolResultContent = `Link de pago generado exitosamente para "${result.product_name}". URL del link: ${result.link}. INSTRUCCIONES: Comparte este link de pago al cliente de forma natural y amigable. Dile algo como "Aqui tienes tu link de pago seguro:" seguido del link. NO modifiques la URL. NO agregues texto innecesario despues del link. NO repitas informacion tecnica.`;
         }
 
         aiResponse = await callAIWithToolResult(
@@ -1243,17 +1246,18 @@ export async function processMessage(
 
         let toolResultContent: string;
         if ("error" in result) {
-          toolResultContent = `Error: ${result.error}`;
+          toolResultContent = `Error al crear el cobro personalizado: ${result.error}. INSTRUCCIONES: Disculpate con el cliente y explica que no se pudo procesar la solicitud. Sugiere alternativas: intentar con un monto diferente, contactar directamente al negocio, o usar transferencia bancaria si esta disponible.`;
         } else {
           if (result.link) {
             paymentLink = result.link;
           }
-          toolResultContent = JSON.stringify({
-            payment_link: result.link || null,
-            merchant_payment_link_id: result.id || null,
-            status: result.status,
-            message: result.message,
-          });
+          if (result.status === "created" && result.link) {
+            toolResultContent = `Link de pago personalizado creado exitosamente. URL: ${result.link}. INSTRUCCIONES: Comparte este link de pago al cliente de forma natural y clara. Indica el monto y concepto del cobro. NO modifiques la URL. NO repitas informacion tecnica.`;
+          } else if (result.status === "pending_approval") {
+            toolResultContent = `Solicitud de cobro personalizado creada con estado "pendiente de aprobacion". INSTRUCCIONES: Informa al cliente que su solicitud de pago fue recibida correctamente y esta siendo revisada por el equipo del negocio. Le enviaremos el link de pago una vez aprobada la solicitud. NO inventes un link de pago. NO digas que hubo un error. Se amable y tranquilizador.`;
+          } else {
+            toolResultContent = `Solicitud de cobro creada en modo manual. INSTRUCCIONES: Informa al cliente que la solicitud fue registrada exitosamente y que un agente del negocio le enviara el link de pago en breve. NO inventes un link de pago. Se amable.`;
+          }
         }
 
         aiResponse = await callAIWithToolResult(

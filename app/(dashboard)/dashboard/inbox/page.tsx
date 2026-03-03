@@ -10,6 +10,7 @@ import {
   MessageSquare,
   Globe,
   RefreshCw,
+  ArrowLeft,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -419,7 +420,7 @@ export default function InboxPage() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <Card className="xl:col-span-1">
+        <Card className={`xl:col-span-1 ${selectedThreadId ? "hidden xl:block" : ""}`}>
           <CardHeader>
             <CardTitle className="text-base">Threads</CardTitle>
             <CardDescription>{threads.length} conversaciones</CardDescription>
@@ -510,9 +511,16 @@ export default function InboxPage() {
           </CardContent>
         </Card>
 
-        <Card className="xl:col-span-2">
+        <Card className={`xl:col-span-2 ${!selectedThreadId ? "hidden xl:block" : ""}`}>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
+              <button
+                type="button"
+                className="xl:hidden p-1 -ml-1 rounded-md hover:bg-muted transition-colors"
+                onClick={() => setSelectedThreadId(null)}
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
               <MessageSquare className="w-4 h-4" />
               {selectedThread ? selectedThread.user_identifier : "Selecciona una conversacion"}
             </CardTitle>
@@ -552,7 +560,7 @@ export default function InboxPage() {
                 </Button>
               ) : null}
 
-              <div className="border rounded-md p-3 h-[420px] overflow-y-auto space-y-3">
+              <div className="border rounded-md p-3 h-[300px] sm:h-[420px] overflow-y-auto space-y-3">
               {!selectedThread ? (
                 <p className="text-sm text-muted-foreground">Selecciona una conversacion para ver mensajes.</p>
               ) : loadingMessages || messages === undefined ? (
@@ -588,7 +596,8 @@ export default function InboxPage() {
                 onChange={(e) => setReplyText(e.target.value)}
                 placeholder={selectedThread ? "Escribe tu respuesta manual..." : "Selecciona una conversacion"}
                 disabled={!selectedThread || sendingReply}
-                rows={4}
+                rows={3}
+                className="min-h-[44px]"
               />
               <div className="flex justify-end">
                 <Button onClick={() => void handleReply()} disabled={!selectedThread || sendingReply || !replyText.trim()}>

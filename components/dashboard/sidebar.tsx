@@ -17,6 +17,8 @@ import {
   Play,
   Wand2,
   Server,
+  CreditCard,
+  KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -33,53 +35,78 @@ interface NavItem {
   requiredPlan?: "pro" | "enterprise";
 }
 
-const navItems: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Setup", href: "/dashboard/setup", icon: Wand2, badge: "Nuevo" },
-  { label: "Productos", href: "/dashboard/products", icon: Package },
-  { label: "Bandeja", href: "/dashboard/inbox", icon: Inbox },
-  { label: "Chat Logs", href: "/dashboard/chat-logs", icon: MessageSquare },
-  { label: "Contactos", href: "/dashboard/contacts", icon: Users },
+interface NavGroup {
+  label?: string;
+  items: NavItem[];
+}
+
+const navGroups: NavGroup[] = [
   {
-    label: "Equipo",
-    href: "/dashboard/team",
-    icon: Users,
-    badge: "Enterprise",
-    requiredPlan: "enterprise",
+    label: "Principal",
+    items: [
+      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Productos", href: "/dashboard/products", icon: Package },
+      { label: "Bandeja", href: "/dashboard/inbox", icon: Inbox },
+    ],
   },
   {
-    label: "Canales",
-    href: "/dashboard/channels",
-    icon: Share2,
+    label: "Comunicación",
+    items: [
+      { label: "Canales", href: "/dashboard/channels", icon: Share2 },
+      { label: "Chat Logs", href: "/dashboard/chat-logs", icon: MessageSquare },
+      { label: "Contactos", href: "/dashboard/contacts", icon: Users },
+    ],
   },
   {
-    label: "Probar Bot",
-    href: "/dashboard/channels/simulator",
-    icon: Play,
-  },
-  { label: "Configuración", href: "/dashboard/settings", icon: Settings },
-  {
-    label: "API Keys",
-    href: "/dashboard/settings/api-keys",
-    icon: Settings, // using settings icon or could use KeyRound if imported
-    badge: "Enterprise",
-    requiredPlan: "enterprise",
+    label: "Negocio",
+    items: [
+      { label: "Pagos", href: "/dashboard/payments", icon: CreditCard },
+      { label: "Setup", href: "/dashboard/setup", icon: Wand2, badge: "Nuevo" },
+    ],
   },
   {
-    label: "MCP Servers",
-    href: "/dashboard/settings/mcp",
-    icon: Server, // need to import Server from lucide-react
-    badge: "Enterprise+",
-    requiredPlan: "enterprise",
+    label: "Configuración",
+    items: [
+      { label: "Configuración", href: "/dashboard/settings", icon: Settings },
+      { label: "Probar Bot", href: "/dashboard/channels/simulator", icon: Play },
+    ],
   },
   {
-    label: "Marca Propia",
-    href: "/dashboard/settings/branding",
-    icon: Wand2,
-    badge: "Enterprise+",
-    requiredPlan: "enterprise",
+    label: "Enterprise",
+    items: [
+      {
+        label: "Equipo",
+        href: "/dashboard/team",
+        icon: Users,
+        badge: "Enterprise",
+        requiredPlan: "enterprise",
+      },
+      {
+        label: "API Keys",
+        href: "/dashboard/settings/api-keys",
+        icon: KeyRound,
+        badge: "Enterprise",
+        requiredPlan: "enterprise",
+      },
+      {
+        label: "MCP Servers",
+        href: "/dashboard/settings/mcp",
+        icon: Server,
+        badge: "Enterprise+",
+        requiredPlan: "enterprise",
+      },
+      {
+        label: "Marca Propia",
+        href: "/dashboard/settings/branding",
+        icon: Wand2,
+        badge: "Enterprise+",
+        requiredPlan: "enterprise",
+      },
+    ],
   },
 ];
+
+const allNavItems = navGroups.flatMap((g) => g.items);
 
 const planConfig = {
   basic: { label: "Plan Básico", color: "secondary" as const, icon: Bot },
@@ -123,56 +150,65 @@ function SidebarContent({ tenant, userRole, onNavigate }: SidebarContentProps) {
       </div>
 
       {/* Navegación */}
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {navItems.map((item) => {
-          const isActive =
-            pathname === item.href ||
-            (item.href !== "/dashboard" &&
-              pathname.startsWith(item.href) &&
-              !navItems.some(
-                (other) =>
-                  other.href !== item.href &&
-                  other.href.startsWith(item.href) &&
-                  pathname.startsWith(other.href)
-              ));
+      <nav className="flex-1 px-3 py-3 overflow-y-auto">
+        {navGroups.map((group, groupIdx) => (
+          <div key={groupIdx} className={cn("space-y-0.5", groupIdx > 0 && "mt-4")}>
+            {group.label && (
+              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/40 select-none">
+                {group.label}
+              </p>
+            )}
+            {group.items.map((item) => {
+              const isActive =
+                pathname === item.href ||
+                (item.href !== "/dashboard" &&
+                  pathname.startsWith(item.href) &&
+                  !allNavItems.some(
+                    (other) =>
+                      other.href !== item.href &&
+                      other.href.startsWith(item.href) &&
+                      pathname.startsWith(other.href)
+                  ));
 
-          const isLocked =
-            item.requiredPlan &&
-            plan !== item.requiredPlan &&
-            !(item.requiredPlan === "pro" && ["enterprise", "enterprise_plus"].includes(plan)) &&
-            !(item.requiredPlan === "enterprise" && plan === "enterprise_plus");
+              const isLocked =
+                item.requiredPlan &&
+                plan !== item.requiredPlan &&
+                !(item.requiredPlan === "pro" && ["enterprise", "enterprise_plus"].includes(plan)) &&
+                !(item.requiredPlan === "enterprise" && plan === "enterprise_plus");
 
-          const Icon = item.icon;
+              const Icon = item.icon;
 
-          return (
-            <Link
-              key={item.href}
-              href={isLocked ? "/dashboard/settings" : item.href}
-              prefetch={false}
-              onClick={onNavigate}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors group relative min-h-[44px]",
-                isActive
-                  ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                isLocked && "opacity-60 cursor-pointer"
-              )}
-              title={isLocked ? `Requiere ${item.badge}` : undefined}
-            >
-              <Icon className="w-4 h-4 shrink-0" />
-              <span className="flex-1 truncate">{item.label}</span>
-              {item.badge && !isActive && (
-                <Badge
-                  variant={isLocked ? "outline" : "secondary"}
-                  className="text-[10px] px-1.5 py-0"
+              return (
+                <Link
+                  key={item.href}
+                  href={isLocked ? "/dashboard/settings" : item.href}
+                  prefetch={false}
+                  onClick={onNavigate}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors group relative min-h-[40px]",
+                    isActive
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                    isLocked && "opacity-60 cursor-pointer"
+                  )}
+                  title={isLocked ? `Requiere ${item.badge}` : undefined}
                 >
-                  {item.badge}
-                </Badge>
-              )}
-              {isActive && <ChevronRight className="w-3 h-3 ml-auto shrink-0" />}
-            </Link>
-          );
-        })}
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="flex-1 truncate">{item.label}</span>
+                  {item.badge && !isActive && (
+                    <Badge
+                      variant={isLocked ? "outline" : "secondary"}
+                      className="text-[10px] px-1.5 py-0"
+                    >
+                      {item.badge}
+                    </Badge>
+                  )}
+                  {isActive && <ChevronRight className="w-3 h-3 ml-auto shrink-0" />}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* Plan Badge */}

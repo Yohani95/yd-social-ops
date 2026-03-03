@@ -1,6 +1,7 @@
 ﻿import { createServiceClient } from "@/lib/supabase/server";
 import { getMPClient, Preference } from "@/lib/mercadopago";
 import { getAppUrl } from "@/lib/app-url";
+import { sendPendingApprovalNotificationEmail } from "@/lib/email";
 import type {
   ChatChannel,
   MerchantAdHocLinkMode,
@@ -321,6 +322,14 @@ export async function createMerchantPaymentLink(
       status: row.status,
       amount_clp: row.amount_clp,
     });
+
+    // Notify owner when a link needs approval
+    if (modeUsed === "approval" && row.status === "pending_approval") {
+      notifyOwnerPendingApproval(input.tenantId, row).catch((err) =>
+        console.warn("[Merchant Link] owner_notification_failed", err)
+      );
+    }
+
     return { ok: true, link: row };
   }
 
@@ -595,6 +604,47 @@ export async function markMerchantPaymentLinkPaid(params: {
     })
     .eq("tenant_id", params.tenantId)
     .eq("id", params.linkId);
+}
+
+async function notifyOwnerPendingApproval(
+  tenantId: string,
+  link: MerchantPaymentLink
+): Promise<void> {
+  const supabase = createServiceClient();
+
+  const { data: tenantUser } = await supabase
+    .from("tenant_users")
+    .select("user_id")
+    .eq("tenant_id", tenantId)
+    .eq("role", "owner")
+    .single();
+
+  if (!tenantUser) return;
+
+  const { data: { user } } = await supabase.auth.admin.getUserById(tenantUser.user_id);
+  if (!user?.email) return;
+
+  const { data: tenant } = await supabase
+    .from("tenants")
+    .select("business_name")
+    .eq("id", tenantId)
+    .single();
+
+  const appUrl = getAppUrl();
+  const customerRef =
+    typeof (link.metadata as Record<string, unknown>)?.customer_ref === "string"
+      ? String((link.metadata as Record<string, unknown>).customer_ref)
+      : "Cliente";
+
+  await sendPendingApprovalNotificationEmail({
+    tenantId,
+    to: user.email,
+    businessName: tenant?.business_name || "Tu negocio",
+    linkTitle: link.title,
+    amount: `$${Number(link.amount_clp).toLocaleString("es-CL")} CLP`,
+    customerRef,
+    dashboardUrl: `${appUrl}/dashboard/payments`,
+  });
 }
 
 export async function markMerchantPaymentLinkFailedByPreference(params: {

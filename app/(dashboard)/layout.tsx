@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { DashboardSidebar } from "@/components/dashboard/sidebar";
 import { DashboardHeader } from "@/components/dashboard/header";
+import { BottomNav } from "@/components/dashboard/bottom-nav";
 import { DashboardProvider } from "@/components/dashboard/dashboard-context";
 import { SidebarProvider } from "@/components/dashboard/sidebar-context";
 import { hexToHslString } from "@/lib/utils";
@@ -60,7 +61,7 @@ export default async function DashboardLayout({
         <DashboardSidebar tenant={tenant} userRole={tenantUser?.role} />
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
           <DashboardHeader user={user} tenant={tenant} />
-          <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-[calc(1rem+3.5rem)] lg:pb-6">
             <DashboardProvider
               value={{
                 tenant,
@@ -73,6 +74,7 @@ export default async function DashboardLayout({
             </DashboardProvider>
           </main>
         </div>
+        <BottomNav />
       </div>
     </SidebarProvider>
   );

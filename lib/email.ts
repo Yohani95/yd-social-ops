@@ -468,6 +468,112 @@ async function sendEmail(params: SendEmailParams): Promise<SendEmailResult> {
   }
 }
 
+function passwordRecoveryTemplate(params: {
+  resetUrl: string;
+  businessName?: string;
+}): string {
+  return emailShell({
+    businessName: params.businessName || "YD Social Ops",
+    title: "Restablecer contraseña",
+    subtitle: "Recibimos una solicitud para restablecer tu contraseña",
+    accent: "#2563eb",
+    body:
+      `<p style="margin:0 0 14px 0;font-size:15px;line-height:1.65;color:#374151;">
+        Haz clic en el botón para crear una nueva contraseña. Si no solicitaste este cambio, puedes ignorar este correo.
+      </p>` +
+      button("Restablecer contraseña", params.resetUrl, "#2563eb") +
+      `<p style="margin:14px 0 0 0;font-size:12px;color:#9ca3af;">
+        Este enlace expira en 1 hora. Si el botón no funciona, copia y pega esta URL en tu navegador:<br/>
+        <a href="${escapeHtml(params.resetUrl)}" style="color:#2563eb;word-break:break-all;">${escapeHtml(params.resetUrl)}</a>
+      </p>`,
+  });
+}
+
+function emailConfirmationTemplate(params: {
+  confirmUrl: string;
+  userName?: string;
+  businessName?: string;
+}): string {
+  return emailShell({
+    businessName: params.businessName || "YD Social Ops",
+    title: "Confirma tu email",
+    subtitle: params.userName
+      ? `Hola ${escapeHtml(params.userName)}, confirma tu cuenta`
+      : "Confirma tu cuenta para comenzar",
+    accent: "#0f766e",
+    body:
+      `<p style="margin:0 0 14px 0;font-size:15px;line-height:1.65;color:#374151;">
+        Haz clic en el botón para verificar tu email y activar tu cuenta.
+      </p>` +
+      button("Confirmar email", params.confirmUrl, "#0f766e") +
+      `<p style="margin:14px 0 0 0;font-size:12px;color:#9ca3af;">
+        Si no creaste una cuenta, puedes ignorar este correo.
+      </p>`,
+  });
+}
+
+function pendingApprovalNotificationTemplate(params: {
+  businessName: string;
+  linkTitle: string;
+  amount: string;
+  customerRef: string;
+  dashboardUrl: string;
+}): string {
+  return emailShell({
+    businessName: params.businessName,
+    title: "Link de pago pendiente",
+    subtitle: "Un cobro requiere tu aprobación",
+    accent: "#b45309",
+    body:
+      infoTable([
+        ["Concepto", safeText(params.linkTitle)],
+        ["Monto", safeText(params.amount)],
+        ["Cliente", safeText(params.customerRef)],
+      ]) +
+      button("Revisar y aprobar", params.dashboardUrl, "#b45309") +
+      `<p style="margin:10px 0 0 0;font-size:13px;color:#6b7280;">
+        Si no apruebas este cobro, el link no será enviado al cliente.
+      </p>`,
+  });
+}
+
+export async function sendPasswordRecoveryEmail(
+  to: string,
+  resetUrl: string,
+  businessName?: string
+): Promise<SendEmailResult> {
+  return sendEmail({
+    to,
+    subject: "Restablecer tu contraseña - YD Social Ops",
+    html: passwordRecoveryTemplate({ resetUrl, businessName }),
+  });
+}
+
+export async function sendPendingApprovalNotificationEmail(params: {
+  tenantId: string;
+  to: string;
+  businessName: string;
+  linkTitle: string;
+  amount: string;
+  customerRef: string;
+  dashboardUrl: string;
+}): Promise<SendEmailResult> {
+  return sendEmail({
+    tenantId: params.tenantId,
+    to: params.to,
+    subject: `Cobro pendiente de aprobación - ${params.businessName}`,
+    html: pendingApprovalNotificationTemplate(params),
+  });
+}
+
+export function getPasswordRecoveryTemplateHtml(): string {
+  return passwordRecoveryTemplate({ resetUrl: "{{ .ConfirmationURL }}" });
+}
+
+export function getEmailConfirmationTemplateHtml(): string {
+  return emailConfirmationTemplate({ confirmUrl: "{{ .ConfirmationURL }}" });
+}
+
 export async function sendWelcomeEmail(to: string, businessName: string): Promise<SendEmailResult> {
   return sendEmail({
     to,
