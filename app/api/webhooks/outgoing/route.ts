@@ -8,6 +8,14 @@ import { notifyN8n } from "@/lib/integrations/n8n";
  */
 export async function POST(request: NextRequest) {
   try {
+    const authToken = process.env.OUTGOING_WEBHOOK_TOKEN;
+    if (authToken) {
+      const provided = request.headers.get("x-outgoing-webhook-token");
+      if (!provided || provided !== authToken) {
+        return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+      }
+    }
+
     const body = await request.json();
     const event = typeof body?.event === "string" ? body.event : "unknown";
     const tenantId =
