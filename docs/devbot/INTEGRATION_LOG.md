@@ -12,3 +12,8 @@ Registro de mejoras/integraciones de alto impacto detectadas en cada corrida.
 - **Impacto:** Evita abuso del endpoint público y habilita notificaciones confiables de pagos, nuevos leads y fallas.
 - **Estado:** Implementado parcial (validación opcional por header).
 - **Próximos pasos:** Definir `OUTGOING_WEBHOOK_TOKEN` en envs y configurar workflow en n8n con destino Slack/Telegram.
+
+- **Propuesta:** Robustecer entrega de webhooks hacia n8n con timeout configurable y registro explícito de respuestas no-2xx para monitoreo.
+- **Impacto:** Reduce cuelgues por timeouts, mejora observabilidad y acelera diagnóstico de fallas en automatizaciones críticas (pagos, alertas).
+- **Estado:** Implementado (timeout + logging de status).
+- **Próximos pasos:** Definir `N8N_WEBHOOK_TIMEOUT_MS` si se requiere ajuste (default 5000ms) y crear alerta en logs/monitor.
