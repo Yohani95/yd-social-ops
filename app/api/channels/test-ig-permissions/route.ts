@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedContext } from "@/lib/supabase/server";
+import { safeDecrypt } from "@/lib/encryption";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -21,7 +22,16 @@ export async function GET(request: NextRequest) {
   }
 
   const token = channel.access_token as string;
-  const igAccountId = (channel.provider_config as Record<string, string>)?.ig_account_id;
+  const providerConfig =
+    channel.provider_config && typeof channel.provider_config === "object"
+      ? (channel.provider_config as Record<string, unknown>)
+      : {};
+  const igAccountId = typeof providerConfig.ig_account_id === "string" ? providerConfig.ig_account_id : null;
+  const userTokenEncrypted =
+    typeof providerConfig.meta_user_access_token_encrypted === "string"
+      ? providerConfig.meta_user_access_token_encrypted
+      : null;
+  const userToken = safeDecrypt(userTokenEncrypted);
 
   if (!token || !igAccountId) {
     return NextResponse.json({ error: "Faltan credenciales del canal de Instagram" }, { status: 400 });
@@ -70,8 +80,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const meRes = await fetch(`https://graph.facebook.com/v21.0/me?fields=id,name,email&access_token=${token}`);
-    results.me_test = await meRes.json();
+    const profileToken = userToken || token;
+    const meRes = await fetch(`https://graph.facebook.com/v21.0/me?fields=id,name,email&access_token=${profileToken}`);
+    const meData = await meRes.json();
+    results.me_test = {
+      token_source: userToken ? "oauth_user_token" : "channel_access_token",
+      ...meData,
+    };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "me_test_failed";
     results.me_test = { error: message };

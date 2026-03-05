@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getAppUrl } from "@/lib/app-url";
+import { encrypt } from "@/lib/encryption";
 
 const META_OAUTH_NONCE_COOKIE = "yd_oauth_nonce_meta";
 const OAUTH_STATE_MAX_AGE_MS = 15 * 60 * 1000;
+
+function tryEncrypt(value: string): string | null {
+  try {
+    return encrypt(value);
+  } catch (err) {
+    console.warn("[Meta OAuth] No se pudo cifrar token de usuario:", err);
+    return null;
+  }
+}
 
 function redirectWithMetaCookieClear(url: string) {
   const response = NextResponse.redirect(url);
@@ -214,13 +224,33 @@ export async function GET(request: NextRequest) {
       ? (providerConfig.page_access_token as string) || accessToken
       : accessToken;
 
-    // Test API calls to satisfy Meta's permission usage requirements for email and public_profile
+    // Guarda perfil y token de usuario para pruebas de App Review (email/public_profile).
+    let oauthUserId: string | null = null;
+    let oauthUserName: string | null = null;
+    let oauthUserEmail: string | null = null;
     try {
-      await fetch(`https://graph.facebook.com/v21.0/me?fields=id,name,email&access_token=${accessToken}`);
-      console.info("[Meta OAuth] Tested email & public_profile permissions.");
+      const meRes = await fetch(`https://graph.facebook.com/v21.0/me?fields=id,name,email&access_token=${accessToken}`);
+      const meData = await meRes.json();
+      if (!meRes.ok) {
+        console.warn("[Meta OAuth] /me (email/public_profile) devolvió error:", meData);
+      } else {
+        oauthUserId = typeof meData?.id === "string" ? meData.id : null;
+        oauthUserName = typeof meData?.name === "string" ? meData.name : null;
+        oauthUserEmail = typeof meData?.email === "string" ? meData.email : null;
+        console.info("[Meta OAuth] Tested email/public_profile. user_id=%s email_present=%s", oauthUserId, Boolean(oauthUserEmail));
+      }
     } catch (e) {
       console.error("[Meta OAuth] Error testing email/public_profile:", e);
     }
+
+    const encryptedUserToken = tryEncrypt(accessToken);
+    providerConfig = {
+      ...providerConfig,
+      meta_user_id: oauthUserId,
+      meta_user_name: oauthUserName,
+      meta_user_email: oauthUserEmail,
+      ...(encryptedUserToken ? { meta_user_access_token_encrypted: encryptedUserToken } : {}),
+    };
 
     if (channel_type === "messenger" || channel_type === "instagram") {
       const pageId = providerConfig.page_id as string;

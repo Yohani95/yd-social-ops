@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedContext } from "@/lib/supabase/server";
 import { getAdapter } from "@/lib/channel-adapters";
+import { safeDecrypt } from "@/lib/encryption";
 import type { SocialChannel } from "@/types";
 
 export async function GET(request: NextRequest) {
@@ -31,6 +32,16 @@ export async function GET(request: NextRequest) {
   }
 
   const adapter = getAdapter("whatsapp");
+  const providerConfig =
+    channel.provider_config && typeof channel.provider_config === "object"
+      ? (channel.provider_config as Record<string, unknown>)
+      : {};
+  const userTokenEncrypted =
+    typeof providerConfig.meta_user_access_token_encrypted === "string"
+      ? providerConfig.meta_user_access_token_encrypted
+      : null;
+  const decryptedUserToken = safeDecrypt(userTokenEncrypted);
+  const userToken = decryptedUserToken || (channel.access_token as string | null);
   const results: Record<string, unknown> = {};
 
   try {
@@ -56,6 +67,22 @@ export async function GET(request: NextRequest) {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "read_failed";
     results.read_waba_phone_numbers = { error: message };
+  }
+
+  try {
+    if (userToken) {
+      const meRes = await fetch(`https://graph.facebook.com/v21.0/me?fields=id,name,email&access_token=${userToken}`);
+      const meData = await meRes.json();
+      results.me_test = {
+        token_source: decryptedUserToken ? "oauth_user_token" : "channel_access_token",
+        ...meData,
+      };
+    } else {
+      results.me_test = { error: "missing_user_token" };
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "me_test_failed";
+    results.me_test = { error: message };
   }
 
   const now = new Date().toISOString();

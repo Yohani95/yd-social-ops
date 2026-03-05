@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedContext } from "@/lib/supabase/server";
 import { getAdapter } from "@/lib/channel-adapters";
+import { safeDecrypt } from "@/lib/encryption";
 import type { SocialChannel } from "@/types";
 
 export async function GET(request: NextRequest) {
@@ -31,6 +32,16 @@ export async function GET(request: NextRequest) {
   }
 
   const adapter = getAdapter("messenger");
+  const providerConfig =
+    channel.provider_config && typeof channel.provider_config === "object"
+      ? (channel.provider_config as Record<string, unknown>)
+      : {};
+  const userTokenEncrypted =
+    typeof providerConfig.meta_user_access_token_encrypted === "string"
+      ? providerConfig.meta_user_access_token_encrypted
+      : null;
+  const decryptedUserToken = safeDecrypt(userTokenEncrypted);
+  const userToken = decryptedUserToken || (channel.access_token as string | null);
   const results: Record<string, unknown> = {};
 
   try {
@@ -42,11 +53,18 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const token = channel.access_token;
-    const meRes = await fetch(
-      `https://graph.facebook.com/v21.0/me?fields=id,name,emails,about&access_token=${token}`
-    );
-    results.read_page_info = await meRes.json();
+    if (userToken) {
+      const meRes = await fetch(
+        `https://graph.facebook.com/v21.0/me?fields=id,name,email&access_token=${userToken}`
+      );
+      const meData = await meRes.json();
+      results.read_page_info = {
+        token_source: decryptedUserToken ? "oauth_user_token" : "channel_access_token",
+        ...meData,
+      };
+    } else {
+      results.read_page_info = { error: "missing_user_token" };
+    }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "read_failed";
     results.read_page_info = { error: message };
