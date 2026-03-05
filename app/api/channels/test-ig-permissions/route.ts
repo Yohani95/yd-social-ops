@@ -123,7 +123,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     success: true,
-    message: "Pruebas de IG completadas. Revisa Meta Developers e Instagram para evidencia.",
+    message: "Prueba de Instagram ejecutada correctamente.",
     results,
   });
 }

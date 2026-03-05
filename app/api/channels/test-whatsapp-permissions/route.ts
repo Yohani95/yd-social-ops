@@ -4,6 +4,12 @@ import { getAdapter } from "@/lib/channel-adapters";
 import { safeDecrypt } from "@/lib/encryption";
 import type { SocialChannel } from "@/types";
 
+type TokenSource =
+  | "oauth_user_token"
+  | "oauth_user_token_tenant_fallback"
+  | "channel_access_token"
+  | "missing_user_token";
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const channelId = searchParams.get("channelId");
@@ -36,18 +42,52 @@ export async function GET(request: NextRequest) {
     channel.provider_config && typeof channel.provider_config === "object"
       ? (channel.provider_config as Record<string, unknown>)
       : {};
+  let nextProviderConfig: Record<string, unknown> = { ...providerConfig };
   const userTokenEncrypted =
     typeof providerConfig.meta_user_access_token_encrypted === "string"
       ? providerConfig.meta_user_access_token_encrypted
       : null;
-  const decryptedUserToken = safeDecrypt(userTokenEncrypted);
+
+  let effectiveUserTokenEncrypted = userTokenEncrypted;
+  let decryptedUserToken = safeDecrypt(userTokenEncrypted);
+  let tokenSource: TokenSource = decryptedUserToken ? "oauth_user_token" : "missing_user_token";
+
+  if (!decryptedUserToken) {
+    const { data: metaChannels } = await ctx.supabase
+      .from("social_channels")
+      .select("provider_config, updated_at")
+      .eq("tenant_id", ctx.tenantId)
+      .in("channel_type", ["instagram", "messenger", "whatsapp"])
+      .order("updated_at", { ascending: false });
+
+    for (const candidate of metaChannels ?? []) {
+      const candidateConfig =
+        candidate.provider_config && typeof candidate.provider_config === "object"
+          ? (candidate.provider_config as Record<string, unknown>)
+          : {};
+      const candidateEncrypted =
+        typeof candidateConfig.meta_user_access_token_encrypted === "string"
+          ? candidateConfig.meta_user_access_token_encrypted
+          : null;
+      const candidateToken = safeDecrypt(candidateEncrypted);
+      if (candidateToken && candidateEncrypted) {
+        decryptedUserToken = candidateToken;
+        effectiveUserTokenEncrypted = candidateEncrypted;
+        tokenSource = "oauth_user_token_tenant_fallback";
+        break;
+      }
+    }
+  }
+
   const userToken = decryptedUserToken || (channel.access_token as string | null);
+  if (!decryptedUserToken && userToken) tokenSource = "channel_access_token";
+
   const results: Record<string, unknown> = {};
 
   try {
     await adapter.sendReply(
       testPhone,
-      "Este es un mensaje de prueba para validar whatsapp_business_messaging en Meta Developers.",
+      "Este es un mensaje de prueba para validar whatsapp_business_messaging.",
       channel as SocialChannel
     );
     results.send_reply = { success: true, message: "Mensaje de WhatsApp enviado. Revisa tu celular." };
@@ -73,16 +113,25 @@ export async function GET(request: NextRequest) {
     if (userToken) {
       const meRes = await fetch(`https://graph.facebook.com/v21.0/me?fields=id,name,email&access_token=${userToken}`);
       const meData = await meRes.json();
+      if (decryptedUserToken && effectiveUserTokenEncrypted && !meData?.error) {
+        nextProviderConfig = {
+          ...nextProviderConfig,
+          meta_user_access_token_encrypted: effectiveUserTokenEncrypted,
+          meta_user_id: typeof meData?.id === "string" ? meData.id : null,
+          meta_user_name: typeof meData?.name === "string" ? meData.name : null,
+          meta_user_email: typeof meData?.email === "string" ? meData.email : null,
+        };
+      }
       results.me_test = {
-        token_source: decryptedUserToken ? "oauth_user_token" : "channel_access_token",
+        token_source: tokenSource,
         ...meData,
       };
     } else {
-      results.me_test = { error: "missing_user_token" };
+      results.me_test = { error: "missing_user_token", token_source: "missing_user_token" };
     }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "me_test_failed";
-    results.me_test = { error: message };
+    results.me_test = { error: message, token_source: tokenSource };
   }
 
   const now = new Date().toISOString();
@@ -96,6 +145,7 @@ export async function GET(request: NextRequest) {
   await ctx.supabase
     .from("social_channels")
     .update({
+      provider_config: nextProviderConfig,
       config: {
         ...existingConfig,
         meta_review: {
@@ -114,7 +164,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     success: true,
-    message: "Llamada de prueba de WhatsApp realizada. Revisa Meta Developers en unos minutos.",
+    message: "Prueba de WhatsApp ejecutada correctamente.",
     results,
   });
 }

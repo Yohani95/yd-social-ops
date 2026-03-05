@@ -304,7 +304,12 @@ export default function ChannelsPage() {
         toast.error(data.error || "No se pudo ejecutar la prueba de Meta.");
         return;
       }
-      toast.success(data.message || "Prueba de Meta ejecutada.");
+      const successToast = isWhatsApp
+        ? "Prueba de WhatsApp ejecutada correctamente."
+        : isMessenger
+          ? "Prueba de Messenger ejecutada correctamente."
+          : "Prueba de Instagram ejecutada correctamente.";
+      toast.success(successToast);
       const nextChannels = await getChannels();
       setChannels(nextChannels);
     } catch (error) {
