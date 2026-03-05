@@ -151,6 +151,10 @@ const PLAN_LIMITS: Record<string, { web: boolean; external: number }> = {
   enterprise_plus: { web: true, external: 99 },
 };
 
+const CHANNELS_COMING_SOON: Partial<Record<ChatChannel, boolean>> = {
+  tiktok: true,
+};
+
 export default function ChannelsPage() {
   const { tenant, tenantId } = useDashboard();
   const searchParams = useSearchParams();
@@ -349,10 +353,15 @@ export default function ChannelsPage() {
 
   const usedTypes = new Set(channels.map((c) => c.channel_type as string));
   const availableTypes = Object.keys(CHANNEL_INFO).filter((t) => {
+    if (CHANNELS_COMING_SOON[t as ChatChannel]) return false;
     if (usedTypes.has(t)) return false;
     if (t !== "web" && limits.external <= externalChannels.length) return false;
     return true;
   });
+  const comingSoonTypes = Object.keys(CHANNEL_INFO).filter(
+    (t) => CHANNELS_COMING_SOON[t as ChatChannel] && !usedTypes.has(t)
+  );
+  const canOpenAddDialog = availableTypes.length > 0 || comingSoonTypes.length > 0;
 
   const appUrl = getAppUrl();
   const activeChannel = channels.find((c) => c.id === activeSheet);
@@ -381,7 +390,7 @@ export default function ChannelsPage() {
             <span>{externalChannels.length}/{limits.external === 99 ? "∞" : limits.external} externos</span>
           </div>
 
-          {availableTypes.length > 0 && (
+          {canOpenAddDialog && (
             <Button onClick={() => setShowAdd(true)} className="gap-2 shadow-sm">
               <Plus className="w-4 h-4" />
               Agregar canal
@@ -482,7 +491,7 @@ export default function ChannelsPage() {
           })}
 
           {/* Add channel card (if slots available) */}
-          {availableTypes.length > 0 && (
+          {canOpenAddDialog && (
             <button
               onClick={() => setShowAdd(true)}
               className="group relative text-left rounded-2xl border-2 border-dashed border-border/40 bg-muted/10 overflow-hidden hover:border-border hover:bg-muted/20 transition-all duration-200 active:scale-[0.98] min-h-[160px] flex items-center justify-center"
@@ -492,7 +501,10 @@ export default function ChannelsPage() {
                   <Plus className="w-5 h-5" />
                 </div>
                 <span className="text-sm font-medium">Agregar canal</span>
-                <span className="text-xs opacity-70">{availableTypes.length} disponible{availableTypes.length !== 1 ? "s" : ""}</span>
+                <span className="text-xs opacity-70">
+                  {availableTypes.length} disponible{availableTypes.length !== 1 ? "s" : ""}
+                  {comingSoonTypes.length > 0 ? ` • ${comingSoonTypes.length} proximamente` : ""}
+                </span>
               </div>
             </button>
           )}
@@ -946,6 +958,7 @@ export default function ChannelsPage() {
         open={showAdd}
         onOpenChange={setShowAdd}
         availableTypes={availableTypes}
+        comingSoonTypes={comingSoonTypes}
         onCreated={(ch) => {
           setChannels((prev) => [...(prev || []), ch]);
           setShowAdd(false);
@@ -959,11 +972,13 @@ function AddChannelDialog({
   open,
   onOpenChange,
   availableTypes,
+  comingSoonTypes,
   onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   availableTypes: string[];
+  comingSoonTypes: string[];
   onCreated: (ch: SocialChannel) => void;
 }) {
   const [selectedType, setSelectedType] = useState<string>("");
@@ -1030,6 +1045,30 @@ function AddChannelDialog({
                     {info.description}
                   </p>
                 </button>
+              );
+            })}
+            {comingSoonTypes.map((type) => {
+              const info = CHANNEL_INFO[type];
+              if (!info) return null;
+              return (
+                <div
+                  key={type}
+                  className="p-4 rounded-xl border-2 border-dashed border-border/50 bg-muted/20 text-left opacity-80 cursor-not-allowed"
+                  aria-disabled="true"
+                >
+                  <div className={`w-10 h-10 mb-3 flex items-center justify-center rounded-xl bg-gradient-to-br ${info.gradient} shadow-sm`}>
+                    {info.icon}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold">{info.label}</p>
+                    <Badge variant="secondary" className="text-[10px] h-5">
+                      Proximamente
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                    {info.description}
+                  </p>
+                </div>
               );
             })}
           </div>

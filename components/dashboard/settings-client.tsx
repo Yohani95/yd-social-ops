@@ -123,6 +123,8 @@ const gmailErrorMessages: Record<string, string> = {
   access_denied: "Autorizacion cancelada por el usuario",
 };
 
+const GMAIL_OAUTH_COMING_SOON = true;
+
 const saasPlanOptions: Array<{
   id: PlanTier;
   name: string;
@@ -551,6 +553,10 @@ export function SettingsClient({
   }
 
   function handleConnectGmail() {
+    if (GMAIL_OAUTH_COMING_SOON) {
+      toast.info("Gmail OAuth estara disponible proximamente.");
+      return;
+    }
     if (!tenant?.id) return;
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
     if (!clientId) {
@@ -1350,18 +1356,24 @@ export function SettingsClient({
                 <div>
                   <p className="text-sm font-medium">Gmail (OAuth)</p>
                   <p className="text-xs text-muted-foreground">
-                    {gmailOAuthForm.email
+                    {GMAIL_OAUTH_COMING_SOON
+                      ? "Integracion pausada temporalmente. Se habilitara proximamente."
+                      : gmailOAuthForm.email
                       ? `Cuenta: ${gmailOAuthForm.email}`
                       : "Conecta Gmail sin configurar puerto ni SMTP"}
                   </p>
                 </div>
-                <Badge variant={gmailOAuthForm.is_active ? "success" : "outline"}>
-                  {gmailOAuthForm.is_active ? "Conectado" : "No conectado"}
+                <Badge variant={GMAIL_OAUTH_COMING_SOON ? "secondary" : gmailOAuthForm.is_active ? "success" : "outline"}>
+                  {GMAIL_OAUTH_COMING_SOON ? "Proximamente" : gmailOAuthForm.is_active ? "Conectado" : "No conectado"}
                 </Badge>
-                <Button className="w-full" onClick={handleConnectGmail} disabled={!isOwner || isPending}>
-                  {gmailOAuthForm.is_active ? "Reconectar" : "Conectar"}
+                <Button
+                  className="w-full"
+                  onClick={handleConnectGmail}
+                  disabled={GMAIL_OAUTH_COMING_SOON || !isOwner || isPending}
+                >
+                  {GMAIL_OAUTH_COMING_SOON ? "Proximamente" : gmailOAuthForm.is_active ? "Reconectar" : "Conectar"}
                 </Button>
-                {gmailOAuthForm.is_active && (
+                {!GMAIL_OAUTH_COMING_SOON && gmailOAuthForm.is_active && (
                   <Button
                     className="w-full"
                     variant="outline"
@@ -1426,7 +1438,7 @@ export function SettingsClient({
           </Card>
 
           {/* Gmail OAuth Dialog */}
-          <Dialog open={selectedConnector === "gmail_oauth"} onOpenChange={(o) => !o && setSelectedConnector(null)}>
+          <Dialog open={!GMAIL_OAUTH_COMING_SOON && selectedConnector === "gmail_oauth"} onOpenChange={(o) => !o && setSelectedConnector(null)}>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>Gmail (OAuth)</DialogTitle>

@@ -27,6 +27,11 @@ export async function createChannel(params: {
   const ctx = await getAuthenticatedContext();
   if (!ctx) return { success: false, error: "No autenticado" };
 
+  // Mantener el canal en código, pero bloquear altas nuevas hasta habilitación oficial.
+  if (params.channel_type === "tiktok") {
+    return { success: false, error: "TikTok estara disponible proximamente." };
+  }
+
   const { data: tenant } = await ctx.supabase
     .from("tenants")
     .select("plan_tier")
