@@ -510,3 +510,139 @@ export interface DashboardStats {
   payment_links_generated: number;
   active_products: number;
 }
+
+// ============================================================
+// BOT CONFIG AVANZADO (Fase 2)
+// ============================================================
+
+export type SensitiveTopicsPolicy = "strict" | "moderate" | "relaxed";
+export type AutomationEventType = "dm" | "comment" | "mention" | "story_reply";
+export type AutomationAction = "auto_reply" | "public_reply" | "open_dm" | "handoff_agent" | "ignore";
+export type CommentDecision = "public_reply" | "dm_followup" | "human_handoff" | "ignore";
+
+export interface TenantBotConfig {
+  id: string;
+  tenant_id: string;
+  default_tone: BotTone;
+  max_response_chars_by_channel: Partial<Record<ChatChannel, number>>;
+  coherence_window_turns: number;
+  repetition_guard_enabled: boolean;
+  fallback_to_human_enabled: boolean;
+  fallback_confidence_threshold: number;
+  sensitive_topics_policy: SensitiveTopicsPolicy;
+  channel_overrides: Partial<Record<ChatChannel, Record<string, unknown>>>;
+  feature_flags: Record<string, boolean>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChannelAutomationRule {
+  id: string;
+  tenant_id: string;
+  channel: ChatChannel;
+  event_type: AutomationEventType;
+  is_active: boolean;
+  allowed_actions: AutomationAction[];
+  confidence_threshold: number;
+  quiet_hours_policy: Record<string, unknown> | null;
+  safety_policy_ref: string | null;
+  priority: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ============================================================
+// CONVERSATION EVENTS & QUALITY (Fase 1)
+// ============================================================
+
+export interface ConversationEvent {
+  id: string;
+  tenant_id: string;
+  channel: ChatChannel;
+  event_type: AutomationEventType;
+  event_idempotency_key: string;
+  source_message_id: string | null;
+  source_author_id: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  classification: Record<string, unknown> | null;
+  decision: AutomationAction | null;
+  thread_id: string | null;
+  processed: boolean;
+  processed_at: string | null;
+  created_at: string;
+}
+
+export interface BotQualityEvent {
+  id: string;
+  tenant_id: string;
+  channel: ChatChannel;
+  event_type: AutomationEventType;
+  conversation_event_id: string | null;
+  thread_id: string | null;
+  session_id: string | null;
+  user_identifier: string | null;
+  user_message_length: number;
+  response_length: number;
+  response_latency_ms: number | null;
+  intent_detected: IntentType | null;
+  provider_used: string | null;
+  tokens_used: number;
+  is_fallback_response: boolean;
+  is_repetition: boolean;
+  coherence_score: number | null;
+  evaluator_notes: Record<string, unknown>;
+  created_at: string;
+}
+
+// ============================================================
+// INSTAGRAM COMMENTS (Fase 3)
+// ============================================================
+
+export interface InstagramCommentEvent {
+  comment_id: string;
+  media_id: string;
+  from_id: string;
+  from_username?: string;
+  message: string;
+  timestamp: number;
+}
+
+// ============================================================
+// RAG & KNOWLEDGE (Fase 4)
+// ============================================================
+
+export type KnowledgeSource = "products" | "faq" | "chat_logs" | "manual";
+
+export interface BotKnowledgeChunk {
+  id: string;
+  tenant_id: string;
+  channel: ChatChannel | "all";
+  source: KnowledgeSource;
+  topic: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  version: number;
+  confidence: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// ============================================================
+// QUALITY METRICS (Fase 4)
+// ============================================================
+
+export interface QualityMetrics {
+  channel: ChatChannel | "all";
+  period_from: string;
+  period_to: string;
+  total_responses: number;
+  avg_latency_ms: number | null;
+  p95_latency_ms: number | null;
+  repetition_rate: number;
+  fallback_rate: number;
+  avg_coherence_score: number | null;
+  intent_breakdown: Record<string, number>;
+  provider_breakdown: Record<string, number>;
+}

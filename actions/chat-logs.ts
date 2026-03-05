@@ -49,3 +49,31 @@ export async function getChatLogs(
 
   return (data as ChatLog[]) || [];
 }
+
+export interface TrainingLog {
+  id: string;
+  user_message: string;
+  bot_response: string;
+  intent_detected: string;
+  channel: string;
+  created_at: string;
+}
+
+export async function getRecentLogsForTraining(limitCount = 30): Promise<TrainingLog[]> {
+  const ctx = await getAuthenticatedContext();
+  if (!ctx) return [];
+
+  const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data } = await ctx.supabase
+    .from("chat_logs")
+    .select("id, user_message, bot_response, intent_detected, channel, created_at")
+    .eq("tenant_id", ctx.tenantId)
+    .in("intent_detected", ["purchase_intent", "inquiry"])
+    .not("bot_response", "is", null)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(limitCount);
+
+  return (data as TrainingLog[]) || [];
+}

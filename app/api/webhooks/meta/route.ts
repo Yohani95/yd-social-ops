@@ -5,6 +5,8 @@ import { checkAIRateLimit } from "@/lib/rate-limit";
 import { getAdapter } from "@/lib/channel-adapters";
 import { notifyOwnerOnFirstExternalMessage } from "@/lib/owner-alerts";
 import { ensureContactExists } from "@/lib/contacts";
+import { processInstagramComment } from "@/lib/instagram-comments";
+import { isFeatureEnabled } from "@/lib/feature-flags";
 import {
   getMetaMediaUrl,
   transcribeAudioFromUrl,
@@ -105,6 +107,13 @@ async function handleMessenger(body: unknown) {
 }
 
 async function handleInstagram(body: unknown) {
+  // Fase 3: detectar evento de comentario antes de intentar parsear como DM
+  const igComment = parseInstagramComment(body);
+  if (igComment) {
+    await handleInstagramComment(igComment, body);
+    return;
+  }
+
   const adapter = getAdapter("instagram");
   const parsed = adapter.parseIncoming(body);
   if (!parsed) {
@@ -135,6 +144,101 @@ async function handleInstagram(body: unknown) {
   }
 
   await processAndReply(channel, "instagram", parsed);
+}
+
+/**
+ * Parsea un payload de comentario de Instagram.
+ * Meta envía: entry[].changes[].field === 'comments' con value.{id, from, text, media}
+ */
+function parseInstagramComment(body: unknown): {
+  entryId: string;
+  commentId: string;
+  mediaId: string;
+  fromId: string;
+  fromUsername?: string;
+  message: string;
+  timestamp: number;
+} | null {
+  try {
+    const data = body as {
+      object?: string;
+      entry?: Array<{
+        id?: string;
+        changes?: Array<{
+          field?: string;
+          value?: {
+            id?: string;
+            from?: { id?: string; username?: string };
+            text?: string;
+            media?: { id?: string };
+            timestamp?: number;
+          };
+        }>;
+      }>;
+    };
+
+    if (data?.object !== "instagram") return null;
+
+    const entry = data?.entry?.[0];
+    const change = entry?.changes?.[0];
+    if (change?.field !== "comments") return null;
+
+    const value = change.value;
+    if (!value?.id || !value?.from?.id || !value?.text) return null;
+
+    return {
+      entryId: entry?.id ?? "",
+      commentId: value.id,
+      mediaId: value.media?.id ?? "",
+      fromId: value.from.id,
+      fromUsername: value.from.username,
+      message: value.text,
+      timestamp: value.timestamp ?? Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function handleInstagramComment(
+  comment: NonNullable<ReturnType<typeof parseInstagramComment>>,
+  _originalBody: unknown
+): Promise<void> {
+  // Buscar canal IG por entry ID (page_id o ig_account_id)
+  let channel = await findChannelByProviderConfig("instagram", "ig_account_id", comment.entryId);
+  if (!channel) {
+    channel = await findChannelByProviderConfig("instagram", "page_id", comment.entryId);
+  }
+  if (!channel) {
+    console.warn("[Meta Webhook] IGComment: canal no encontrado para entryId=%s", comment.entryId);
+    return;
+  }
+
+  // Feature flag guard — si está desactivado, solo loguea
+  const enabled = await isFeatureEnabled(channel.tenant_id, "instagram_comments_enabled");
+  if (!enabled) {
+    console.info("[Meta Webhook] IGComment: feature flag desactivado para tenant=%s", channel.tenant_id);
+    return;
+  }
+
+  if (!channel.access_token) {
+    console.warn("[Meta Webhook] IGComment: falta access_token en canal");
+    return;
+  }
+
+  await processInstagramComment({
+    tenantId: channel.tenant_id,
+    channelId: channel.id,
+    accessToken: channel.access_token,
+    event: {
+      comment_id: comment.commentId,
+      media_id: comment.mediaId,
+      from_id: comment.fromId,
+      from_username: comment.fromUsername,
+      message: comment.message,
+      timestamp: comment.timestamp,
+    },
+  });
 }
 
 async function findChannelByProviderConfig(

@@ -11,6 +11,8 @@ import {
   Users,
   Activity,
   BarChart3,
+  AlertCircle,
+  Zap,
 } from "lucide-react";
 import {
   Card,
@@ -73,6 +75,8 @@ export default function DashboardPage() {
             totalContacts: 0,
             messagesLast7Days: 0,
             messagesLast30Days: 0,
+            unansweredThreads: 0,
+            botResponseRate: 0,
             channelBreakdown: [],
             messagesPerDay: [],
             intentBreakdown: [],
@@ -91,6 +95,8 @@ export default function DashboardPage() {
           totalContacts: 0,
           messagesLast7Days: 0,
           messagesLast30Days: 0,
+          unansweredThreads: 0,
+          botResponseRate: 0,
           channelBreakdown: [],
           messagesPerDay: [],
           intentBreakdown: [],
@@ -108,42 +114,54 @@ export default function DashboardPage() {
     );
   }
 
+  const trend7d = stats.messagesLast30Days > 0
+    ? Math.round(((stats.messagesLast7Days - stats.messagesLast30Days / 4) / (stats.messagesLast30Days / 4)) * 100)
+    : 0;
+
   const statCards = [
     {
-      title: "Mensajes totales",
-      value: stats.totalMessages,
+      title: "Mensajes esta semana",
+      value: stats.messagesLast7Days,
       icon: MessageSquare,
-      description: "Conversaciones del bot",
+      description: `${stats.totalMessages.toLocaleString()} históricos · ${trend7d >= 0 ? "+" : ""}${trend7d}% vs sem. anterior`,
+      highlight: false,
     },
     {
       title: "Intenciones de compra",
       value: stats.purchaseIntents,
       icon: ShoppingCart,
-      description: "Clientes interesados",
+      description: stats.totalMessages > 0
+        ? `${Math.round((stats.purchaseIntents / stats.totalMessages) * 100)}% de los mensajes`
+        : "Clientes interesados",
+      highlight: false,
     },
     {
       title: "Links de pago",
       value: stats.paymentLinksGenerated,
       icon: TrendingUp,
       description: "Generados automáticamente",
+      highlight: false,
     },
     {
-      title: "Productos activos",
-      value: stats.activeProducts,
-      icon: Package,
-      description: `de ${stats.totalProducts} en total`,
+      title: "Tasa de respuesta bot",
+      value: `${Math.round(stats.botResponseRate * 100)}%`,
+      icon: Zap,
+      description: "Mensajes con respuesta del bot",
+      highlight: stats.botResponseRate < 0.7,
     },
     {
       title: "Contactos CRM",
       value: stats.totalContacts,
       icon: Users,
       description: "Capturados por el bot",
+      highlight: false,
     },
     {
-      title: "Últimos 7 días",
-      value: stats.messagesLast7Days,
-      icon: Activity,
-      description: "Mensajes esta semana",
+      title: "Threads sin responder",
+      value: stats.unansweredThreads,
+      icon: AlertCircle,
+      description: "Abiertos hace más de 2h",
+      highlight: stats.unansweredThreads > 0,
     },
   ];
 
@@ -192,15 +210,17 @@ export default function DashboardPage() {
         {statCards.map((stat) => {
           const Icon = stat.icon;
           return (
-            <Card key={stat.title}>
+            <Card key={stat.title} className={stat.highlight ? "border-amber-300 dark:border-amber-700 bg-amber-50/40 dark:bg-amber-950/20" : ""}>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
                   {stat.title}
                 </CardTitle>
-                <Icon className="w-4 h-4 text-muted-foreground" />
+                <Icon className={`w-4 h-4 ${stat.highlight ? "text-amber-500" : "text-muted-foreground"}`} />
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-bold">{stat.value}</p>
+                <p className={`text-2xl font-bold ${stat.highlight ? "text-amber-600 dark:text-amber-400" : ""}`}>
+                  {stat.value}
+                </p>
                 <p className="text-xs text-muted-foreground mt-1">
                   {stat.description}
                 </p>

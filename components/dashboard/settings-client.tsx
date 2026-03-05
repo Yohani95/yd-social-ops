@@ -34,8 +34,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { getAppUrl } from "@/lib/app-url";
+import { FeatureFlagsPanel } from "@/components/dashboard/feature-flags-panel";
+import { getBotConfig, updateBotConfig } from "@/actions/bot-config";
 import { updateBankDetails, updateTenant, disconnectMP } from "@/actions/tenant";
 import {
   getIntegrationSettings,
@@ -77,7 +86,8 @@ interface SettingsClientProps {
   gmailSuccess?: boolean;
   gmailError?: string;
   initialSaasPlan?: PlanTier;
-  initialTab?: "general" | "integrations" | "payments" | "enterprise";
+  initialTab?: "general" | "integrations" | "payments" | "enterprise" | "bot";
+  initialFlags?: Record<string, boolean>;
 }
 
 interface BillingSubscriptionResponse {
@@ -186,6 +196,7 @@ export function SettingsClient({
   gmailError,
   initialSaasPlan,
   initialTab,
+  initialFlags,
 }: SettingsClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -937,6 +948,7 @@ export function SettingsClient({
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="integrations">Integraciones</TabsTrigger>
           <TabsTrigger value="payments">Pagos</TabsTrigger>
+          <TabsTrigger value="bot">Bot</TabsTrigger>
           {isEnterprisePlan && (
             <TabsTrigger value="enterprise">Enterprise</TabsTrigger>
           )}
@@ -1413,279 +1425,164 @@ export function SettingsClient({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <MessageCircle className="w-4 h-4" />
-                Configuración del Conector
-              </CardTitle>
-              <CardDescription>
-                Selecciona un conector en el marketplace y guarda los datos para este tenant.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {isIntegrationsLoading ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Cargando integraciones del tenant...
-                </div>
-              ) : (
-                <>
-                  {(selectedConnector === "gmail_oauth" || (!selectedConnector && gmailOAuthForm.is_active)) && (
-                    <div className="space-y-3 rounded-md border p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-medium">Gmail (OAuth)</p>
-                        <Badge variant={gmailOAuthForm.is_active ? "success" : "outline"}>
-                          {gmailOAuthForm.is_active ? "Conectado" : "No conectado"}
-                        </Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {gmailOAuthForm.email
-                          ? `Conectado como ${gmailOAuthForm.email}`
-                          : "Sin cuenta conectada"}
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        <Button onClick={handleConnectGmail} disabled={!isOwner || isPending}>
-                          {gmailOAuthForm.is_active ? "Reconectar Gmail" : "Conectar Gmail"}
-                        </Button>
-                        {gmailOAuthForm.is_active && (
-                          <Button
-                            variant="outline"
-                            onClick={handleDisconnectGmail}
-                            disabled={!isOwner || isPending}
-                          >
-                            Desconectar
-                          </Button>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Recomendado para dueÃ±os: conexiÃ³n simple OAuth, sin host/puerto manual.
-                      </p>
-                    </div>
-                  )}
-
-                  {(selectedConnector === "smtp" || (!selectedConnector && smtpForm.is_active)) && (
-                    <div className="space-y-3 rounded-md border p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-medium">SMTP</p>
-                        <label className="text-xs flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={smtpForm.is_active}
-                            onChange={(e) =>
-                              setSmtpForm((prev) => ({ ...prev, is_active: e.target.checked }))
-                            }
-                            disabled={!isOwner}
-                          />
-                          Activo
-                        </label>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="space-y-2">
-                          <Label htmlFor="smtp_host">Host</Label>
-                          <Input
-                            id="smtp_host"
-                            value={smtpForm.host}
-                            onChange={(e) =>
-                              setSmtpForm((prev) => ({ ...prev, host: e.target.value }))
-                            }
-                            placeholder="smtp.gmail.com"
-                            disabled={!isOwner}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="smtp_port">Puerto</Label>
-                          <Input
-                            id="smtp_port"
-                            type="number"
-                            value={String(smtpForm.port)}
-                            onChange={(e) =>
-                              setSmtpForm((prev) => ({
-                                ...prev,
-                                port: Number(e.target.value || 587),
-                              }))
-                            }
-                            placeholder="587"
-                            disabled={!isOwner}
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="space-y-2">
-                          <Label htmlFor="smtp_user">Usuario SMTP</Label>
-                          <Input
-                            id="smtp_user"
-                            value={smtpForm.user}
-                            onChange={(e) =>
-                              setSmtpForm((prev) => ({ ...prev, user: e.target.value }))
-                            }
-                            placeholder="usuario@dominio.com"
-                            disabled={!isOwner}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="smtp_from">From Email</Label>
-                          <Input
-                            id="smtp_from"
-                            value={smtpForm.from_email}
-                            onChange={(e) =>
-                              setSmtpForm((prev) => ({ ...prev, from_email: e.target.value }))
-                            }
-                            placeholder="noreply@dominio.com"
-                            disabled={!isOwner}
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="smtp_password">Password / App Password</Label>
-                        <Input
-                          id="smtp_password"
-                          type="password"
-                          value={smtpForm.password}
-                          onChange={(e) =>
-                            setSmtpForm((prev) => ({ ...prev, password: e.target.value }))
-                          }
-                          placeholder={smtpForm.has_password ? "******** (configurada)" : "Ingresa password"}
-                          disabled={!isOwner}
-                        />
-                      </div>
-                      <label className="text-xs flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={smtpForm.secure}
-                          onChange={(e) =>
-                            setSmtpForm((prev) => ({ ...prev, secure: e.target.checked }))
-                          }
-                          disabled={!isOwner}
-                        />
-                        Usar TLS/SSL (`secure=true`, típico puerto 465)
-                      </label>
-                      {isOwner && (
-                        <Button onClick={saveSmtpSettings} disabled={isPending}>
-                          Guardar SMTP
-                        </Button>
-                      )}
-                    </div>
-                  )}
-
-                  {(selectedConnector === "resend" || (!selectedConnector && resendForm.is_active)) && (
-                    <div className="space-y-3 rounded-md border p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-medium">Resend (Email)</p>
-                        <label className="text-xs flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={resendForm.is_active}
-                            onChange={(e) =>
-                              setResendForm((prev) => ({ ...prev, is_active: e.target.checked }))
-                            }
-                            disabled={!isOwner}
-                          />
-                          Activo
-                        </label>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="resend_from">Email remitente</Label>
-                        <Input
-                          id="resend_from"
-                          value={resendForm.from_email}
-                          onChange={(e) =>
-                            setResendForm((prev) => ({ ...prev, from_email: e.target.value }))
-                          }
-                          placeholder="noreply@tu-dominio.com"
-                          disabled={!isOwner}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="resend_api_key">API Key</Label>
-                        <Input
-                          id="resend_api_key"
-                          type="password"
-                          value={resendForm.api_key}
-                          onChange={(e) =>
-                            setResendForm((prev) => ({ ...prev, api_key: e.target.value }))
-                          }
-                          placeholder={resendForm.has_api_key ? "******** (configurada)" : "re_xxx..."}
-                          disabled={!isOwner}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Se almacena cifrada. Deja vacio para mantener la clave actual.
-                        </p>
-                      </div>
-                      {isOwner && (
-                        <Button onClick={saveResendSettings} disabled={isPending}>
-                          Guardar Resend
-                        </Button>
-                      )}
-                    </div>
-                  )}
-
-                  {(selectedConnector === "n8n" || (!selectedConnector && n8nForm.is_active)) && (
-                    <div className="space-y-3 rounded-md border p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-medium">n8n Webhook</p>
-                        <label className="text-xs flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={n8nForm.is_active}
-                            onChange={(e) =>
-                              setN8nForm((prev) => ({ ...prev, is_active: e.target.checked }))
-                            }
-                            disabled={!isOwner}
-                          />
-                          Activo
-                        </label>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="n8n_webhook">Webhook URL</Label>
-                        <Input
-                          id="n8n_webhook"
-                          value={n8nForm.webhook_url}
-                          onChange={(e) =>
-                            setN8nForm((prev) => ({ ...prev, webhook_url: e.target.value }))
-                          }
-                          placeholder="https://tu-n8n.com/webhook/yd-social-ops"
-                          disabled={!isOwner}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="n8n_auth_header">Authorization Header (opcional)</Label>
-                        <Input
-                          id="n8n_auth_header"
-                          type="password"
-                          value={n8nForm.auth_header}
-                          onChange={(e) =>
-                            setN8nForm((prev) => ({ ...prev, auth_header: e.target.value }))
-                          }
-                          placeholder={n8nForm.has_auth_header ? "******** (configurado)" : "Bearer xxx"}
-                          disabled={!isOwner}
-                        />
-                      </div>
-                      {isOwner && (
-                        <Button onClick={saveN8nSettings} disabled={isPending}>
-                          Guardar n8n
-                        </Button>
-                      )}
-                    </div>
-                  )}
-
-                  {!selectedConnector &&
-                    !gmailOAuthForm.is_active &&
-                    !smtpForm.is_active &&
-                    !resendForm.is_active &&
-                    !n8nForm.is_active && (
-                      <p className="text-sm text-muted-foreground">
-                        Selecciona una integración arriba para comenzar.
-                      </p>
-                    )}
-
-                  <p className="text-xs text-muted-foreground">
-                    `.env.local` queda solo para secretos globales de la plataforma (ej: `CRON_SECRET`).
+          {/* Gmail OAuth Dialog */}
+          <Dialog open={selectedConnector === "gmail_oauth"} onOpenChange={(o) => !o && setSelectedConnector(null)}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Gmail (OAuth)</DialogTitle>
+                <DialogDescription>Conecta tu cuenta Gmail sin configurar host ni puerto.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 pt-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    {gmailOAuthForm.email ? `Conectado como ${gmailOAuthForm.email}` : "Sin cuenta conectada"}
                   </p>
-                </>
-              )}
-            </CardContent>
-          </Card>
+                  <Badge variant={gmailOAuthForm.is_active ? "success" : "outline"}>
+                    {gmailOAuthForm.is_active ? "Conectado" : "No conectado"}
+                  </Badge>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={handleConnectGmail} disabled={!isOwner || isPending}>
+                    {gmailOAuthForm.is_active ? "Reconectar Gmail" : "Conectar Gmail"}
+                  </Button>
+                  {gmailOAuthForm.is_active && (
+                    <Button variant="outline" onClick={handleDisconnectGmail} disabled={!isOwner || isPending}>
+                      Desconectar
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Recomendado para dueños: conexión simple OAuth, sin host/puerto manual.
+                </p>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* SMTP Dialog */}
+          <Dialog open={selectedConnector === "smtp"} onOpenChange={(o) => !o && setSelectedConnector(null)}>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Configurar SMTP</DialogTitle>
+                <DialogDescription>Gmail, Outlook o servidor de correo propio.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 pt-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={smtpForm.is_active}
+                    onChange={(e) => setSmtpForm((prev) => ({ ...prev, is_active: e.target.checked }))}
+                    disabled={!isOwner}
+                  />
+                  Activo
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="smtp_host_dlg">Host</Label>
+                    <Input id="smtp_host_dlg" value={smtpForm.host} onChange={(e) => setSmtpForm((p) => ({ ...p, host: e.target.value }))} placeholder="smtp.gmail.com" disabled={!isOwner} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="smtp_port_dlg">Puerto</Label>
+                    <Input id="smtp_port_dlg" type="number" value={String(smtpForm.port)} onChange={(e) => setSmtpForm((p) => ({ ...p, port: Number(e.target.value || 587) }))} placeholder="587" disabled={!isOwner} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="smtp_user_dlg">Usuario SMTP</Label>
+                    <Input id="smtp_user_dlg" value={smtpForm.user} onChange={(e) => setSmtpForm((p) => ({ ...p, user: e.target.value }))} placeholder="usuario@dominio.com" disabled={!isOwner} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="smtp_from_dlg">From Email</Label>
+                    <Input id="smtp_from_dlg" value={smtpForm.from_email} onChange={(e) => setSmtpForm((p) => ({ ...p, from_email: e.target.value }))} placeholder="noreply@dominio.com" disabled={!isOwner} />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="smtp_pass_dlg">Password / App Password</Label>
+                  <Input id="smtp_pass_dlg" type="password" value={smtpForm.password} onChange={(e) => setSmtpForm((p) => ({ ...p, password: e.target.value }))} placeholder={smtpForm.has_password ? "******** (configurada)" : "Ingresa password"} disabled={!isOwner} />
+                </div>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={smtpForm.secure} onChange={(e) => setSmtpForm((p) => ({ ...p, secure: e.target.checked }))} disabled={!isOwner} />
+                  Usar TLS/SSL (puerto 465)
+                </label>
+                {isOwner && (
+                  <div className="flex gap-2 pt-1">
+                    <Button onClick={() => { saveSmtpSettings(); setSelectedConnector(null); }} disabled={isPending}>
+                      {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                      Guardar SMTP
+                    </Button>
+                    <Button variant="ghost" onClick={() => setSelectedConnector(null)}>Cancelar</Button>
+                  </div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Resend Dialog */}
+          <Dialog open={selectedConnector === "resend"} onOpenChange={(o) => !o && setSelectedConnector(null)}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Configurar Resend</DialogTitle>
+                <DialogDescription>Proveedor transaccional de email.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 pt-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={resendForm.is_active} onChange={(e) => setResendForm((p) => ({ ...p, is_active: e.target.checked }))} disabled={!isOwner} />
+                  Activo
+                </label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="resend_from_dlg">Email remitente</Label>
+                  <Input id="resend_from_dlg" value={resendForm.from_email} onChange={(e) => setResendForm((p) => ({ ...p, from_email: e.target.value }))} placeholder="noreply@tu-dominio.com" disabled={!isOwner} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="resend_key_dlg">API Key</Label>
+                  <Input id="resend_key_dlg" type="password" value={resendForm.api_key} onChange={(e) => setResendForm((p) => ({ ...p, api_key: e.target.value }))} placeholder={resendForm.has_api_key ? "******** (configurada)" : "re_xxx..."} disabled={!isOwner} />
+                  <p className="text-xs text-muted-foreground">Se almacena cifrada. Deja vacío para mantener la clave actual.</p>
+                </div>
+                {isOwner && (
+                  <div className="flex gap-2 pt-1">
+                    <Button onClick={() => { saveResendSettings(); setSelectedConnector(null); }} disabled={isPending}>
+                      {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                      Guardar Resend
+                    </Button>
+                    <Button variant="ghost" onClick={() => setSelectedConnector(null)}>Cancelar</Button>
+                  </div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* n8n Dialog */}
+          <Dialog open={selectedConnector === "n8n"} onOpenChange={(o) => !o && setSelectedConnector(null)}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Configurar n8n Webhook</DialogTitle>
+                <DialogDescription>Automatizaciones externas por tenant.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 pt-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={n8nForm.is_active} onChange={(e) => setN8nForm((p) => ({ ...p, is_active: e.target.checked }))} disabled={!isOwner} />
+                  Activo
+                </label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="n8n_url_dlg">Webhook URL</Label>
+                  <Input id="n8n_url_dlg" value={n8nForm.webhook_url} onChange={(e) => setN8nForm((p) => ({ ...p, webhook_url: e.target.value }))} placeholder="https://tu-n8n.com/webhook/yd-social-ops" disabled={!isOwner} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="n8n_auth_dlg">Authorization Header (opcional)</Label>
+                  <Input id="n8n_auth_dlg" type="password" value={n8nForm.auth_header} onChange={(e) => setN8nForm((p) => ({ ...p, auth_header: e.target.value }))} placeholder={n8nForm.has_auth_header ? "******** (configurado)" : "Bearer xxx"} disabled={!isOwner} />
+                </div>
+                {isOwner && (
+                  <div className="flex gap-2 pt-1">
+                    <Button onClick={() => { saveN8nSettings(); setSelectedConnector(null); }} disabled={isPending}>
+                      {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                      Guardar n8n
+                    </Button>
+                    <Button variant="ghost" onClick={() => setSelectedConnector(null)}>Cancelar</Button>
+                  </div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
         </TabsContent>
 
                 {/* === TAB: PAGOS (redirige a /dashboard/payments) === */}
@@ -1703,6 +1600,28 @@ export function SettingsClient({
           </Card>
         </TabsContent>
 
+
+        {/* === TAB: BOT === */}
+        <TabsContent value="bot" className="space-y-4 mt-4">
+          <BotConfigCard />
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Bot className="w-4 h-4" />
+                Feature Flags del Bot
+              </CardTitle>
+              <CardDescription>
+                Activa o desactiva funciones del bot por canal. Los cambios aplican en menos de 30 segundos.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <FeatureFlagsPanel
+                initialFlags={initialFlags ?? {}}
+                planTier={tenant?.plan_tier || "basic"}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* === TAB: ENTERPRISE === */}
         {isEnterprisePlan && (
@@ -1941,6 +1860,237 @@ export function SettingsClient({
         )}
       </Tabs>
     </div>
+  );
+}
+
+// ============================================================
+// BotConfigCard — configuración avanzada del bot
+// ============================================================
+function BotConfigCard() {
+  const [config, setConfig] = useState<{
+    coherence_window_turns: number;
+    repetition_guard_enabled: boolean;
+    fallback_to_human_enabled: boolean;
+    fallback_confidence_threshold: number;
+    max_response_chars_by_channel: Record<string, number>;
+    ig_dm_public_ack_enabled: boolean;
+    ig_dm_public_ack_text: string;
+  }>({
+    coherence_window_turns: 10,
+    repetition_guard_enabled: true,
+    fallback_to_human_enabled: false,
+    fallback_confidence_threshold: 0.4,
+    max_response_chars_by_channel: {},
+    ig_dm_public_ack_enabled: false,
+    ig_dm_public_ack_text: "¡Hola! Te envío la información por mensaje directo 💬",
+  });
+  const [loading, setLoading] = useState(true);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    getBotConfig().then((r) => {
+      if (r.success && r.data) {
+        const igOverrides = (r.data.channel_overrides as Record<string, Record<string, unknown>> | null)?.instagram ?? {};
+        setConfig({
+          coherence_window_turns: r.data.coherence_window_turns ?? 10,
+          repetition_guard_enabled: r.data.repetition_guard_enabled ?? true,
+          fallback_to_human_enabled: r.data.fallback_to_human_enabled ?? false,
+          fallback_confidence_threshold: Number(r.data.fallback_confidence_threshold ?? 0.4),
+          max_response_chars_by_channel: (r.data.max_response_chars_by_channel as Record<string, number>) ?? {},
+          ig_dm_public_ack_enabled: igOverrides.dm_public_ack_enabled === true,
+          ig_dm_public_ack_text: typeof igOverrides.dm_public_ack_text === "string" && igOverrides.dm_public_ack_text.trim()
+            ? igOverrides.dm_public_ack_text.trim()
+            : "¡Hola! Te envío la información por mensaje directo 💬",
+        });
+      }
+      setLoading(false);
+    });
+  }, []);
+
+  function save() {
+    startTransition(async () => {
+      const result = await updateBotConfig({
+        coherence_window_turns: config.coherence_window_turns,
+        repetition_guard_enabled: config.repetition_guard_enabled,
+        fallback_to_human_enabled: config.fallback_to_human_enabled,
+        fallback_confidence_threshold: config.fallback_confidence_threshold,
+        max_response_chars_by_channel: config.max_response_chars_by_channel,
+        channel_overrides: {
+          instagram: {
+            dm_public_ack_enabled: config.ig_dm_public_ack_enabled,
+            dm_public_ack_text: config.ig_dm_public_ack_text,
+          },
+        },
+      });
+      if (result.success) {
+        toast.success("Configuración del bot guardada");
+      } else {
+        toast.error(result.error || "Error al guardar");
+      }
+    });
+  }
+
+  const CHANNELS = ["web", "whatsapp", "messenger", "instagram", "tiktok"];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Zap className="w-4 h-4" />
+          Configuración Avanzada del Bot
+        </CardTitle>
+        <CardDescription>
+          Comportamiento del bot: guardia de repetición, tamaño de respuestas, handoff humano.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <>
+            {/* Toggles */}
+            <div className="space-y-3">
+              {[
+                {
+                  key: "repetition_guard_enabled" as const,
+                  label: "Guardia de repetición",
+                  description: "Detecta y marca respuestas repetitivas. Requiere flag quality_tracking_enabled.",
+                },
+                {
+                  key: "fallback_to_human_enabled" as const,
+                  label: "Handoff a humano",
+                  description: "Cuando la confianza cae bajo el umbral, el thread se marca para atención humana.",
+                },
+              ].map(({ key, label, description }) => (
+                <div key={key} className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium">{label}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={config[key]}
+                    onClick={() => setConfig((c) => ({ ...c, [key]: !c[key] }))}
+                    className={`relative flex-shrink-0 inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${config[key] ? "bg-indigo-600" : "bg-gray-200"}`}
+                  >
+                    <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transform transition-transform duration-200 ${config[key] ? "translate-x-4" : "translate-x-0.5"}`} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <Separator />
+
+            {/* Numeric fields */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Ventana de coherencia (turnos)</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={config.coherence_window_turns}
+                  onChange={(e) => setConfig((c) => ({ ...c, coherence_window_turns: Number(e.target.value) }))}
+                />
+                <p className="text-xs text-muted-foreground">Mensajes anteriores a considerar para detectar repetición</p>
+              </div>
+              {config.fallback_to_human_enabled && (
+                <div className="space-y-1.5">
+                  <Label>Umbral de confianza para handoff (0–1)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={config.fallback_confidence_threshold}
+                    onChange={(e) => setConfig((c) => ({ ...c, fallback_confidence_threshold: Number(e.target.value) }))}
+                  />
+                  <p className="text-xs text-muted-foreground">Confianza mínima antes de pasar a agente humano</p>
+                </div>
+              )}
+            </div>
+
+            <Separator />
+
+            {/* Max chars by channel */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Longitud máxima de respuesta por canal</p>
+              <p className="text-xs text-muted-foreground">0 = sin límite</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {CHANNELS.map((ch) => (
+                  <div key={ch} className="space-y-1">
+                    <Label className="text-xs capitalize">{ch}</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={50}
+                      placeholder="0"
+                      value={config.max_response_chars_by_channel[ch] ?? ""}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          max_response_chars_by_channel: {
+                            ...c.max_response_chars_by_channel,
+                            [ch]: Number(e.target.value) || 0,
+                          },
+                        }))
+                      }
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Instagram — respuesta pública al abrir DM */}
+            <div className="space-y-3">
+              <p className="text-sm font-medium flex items-center gap-1.5">
+                <span className="text-pink-500">IG</span> Respuesta pública al abrir DM
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Cuando el bot abre un DM en Instagram, puede publicar también un breve reply público en el comentario original para que el resto vea que fue atendido.
+              </p>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm">Activar acuse público</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.ig_dm_public_ack_enabled}
+                  onClick={() => setConfig((c) => ({ ...c, ig_dm_public_ack_enabled: !c.ig_dm_public_ack_enabled }))}
+                  className={`relative flex-shrink-0 inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${config.ig_dm_public_ack_enabled ? "bg-indigo-600" : "bg-gray-200"}`}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transform transition-transform duration-200 ${config.ig_dm_public_ack_enabled ? "translate-x-4" : "translate-x-0.5"}`} />
+                </button>
+              </div>
+              {config.ig_dm_public_ack_enabled && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Texto del reply público (máx 150 caracteres)</Label>
+                  <Input
+                    value={config.ig_dm_public_ack_text}
+                    onChange={(e) => setConfig((c) => ({ ...c, ig_dm_public_ack_text: e.target.value.slice(0, 150) }))}
+                    placeholder="¡Hola {{username}}! Te envío la información por DM 💬"
+                    className="text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {config.ig_dm_public_ack_text.length}/150 · Variables: <code className="bg-muted px-0.5 rounded">{"{{username}}"}</code> (menciona al usuario) y <code className="bg-muted px-0.5 rounded">{"{{intent}}"}</code> (tipo de consulta)
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <Button onClick={save} disabled={isPending}>
+              {isPending && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+              Guardar configuración
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
