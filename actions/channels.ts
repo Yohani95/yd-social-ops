@@ -218,7 +218,8 @@ export async function subscribeMetaWebhook(channelId: string): Promise<ActionRes
   try {
     let fields = "messages,messaging_postbacks";
     if (channel.channel_type === "instagram") {
-      fields = "messages,messaging_postbacks";
+      // Para comentarios IG es obligatorio incluir "comments" en subscribed_fields.
+      fields = "comments,messages,messaging_postbacks";
     }
 
     const url = `https://graph.facebook.com/v21.0/${pageId}/subscribed_apps?subscribed_fields=${fields}&access_token=${channel.access_token}`;

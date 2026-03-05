@@ -226,7 +226,8 @@ export async function GET(request: NextRequest) {
       const pageId = providerConfig.page_id as string;
       if (pageId && finalAccessToken) {
         const fields = channel_type === "instagram"
-          ? "messages,messaging_postbacks"
+          // Para comentarios IG es obligatorio incluir "comments" en subscribed_fields.
+          ? "comments,messages,messaging_postbacks"
           : "messages,messaging_postbacks";
 
         try {

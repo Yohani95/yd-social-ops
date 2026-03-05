@@ -35,7 +35,7 @@ async function sendCommentReply(
   });
   if (!res.ok) {
     const err = await res.text();
-    console.error("[IGComments] Error enviando reply público:", err);
+    throw new Error(`[IGComments] Error enviando reply público: ${err}`);
   }
 }
 
@@ -56,7 +56,7 @@ async function sendDmToUser(
   });
   if (!res.ok) {
     const err = await res.text();
-    console.error("[IGComments] Error enviando DM:", err);
+    throw new Error(`[IGComments] Error enviando DM: ${err}`);
   }
 }
 
@@ -126,11 +126,10 @@ function decideAction(
 
 export async function processInstagramComment(params: {
   tenantId: string;
-  channelId: string;
   accessToken: string;
   event: InstagramCommentEvent;
 }): Promise<void> {
-  const { tenantId, channelId, accessToken, event } = params;
+  const { tenantId, accessToken, event } = params;
   const idempotencyKey = `ig_comment_${event.comment_id}`;
   const startMs = Date.now();
 
@@ -204,7 +203,7 @@ export async function processInstagramComment(params: {
 
   if (decision === "public_reply") {
     // Respuesta pública breve al comentario
-    const replyText = buildPublicReply(classification.intent, event.message);
+    const replyText = buildPublicReply(classification.intent);
     await sendCommentReply(event.comment_id, replyText, accessToken);
     botReply = replyText;
     console.info("[IGComments] Reply público enviado para", event.comment_id);
@@ -399,10 +398,7 @@ const DM_FOLLOWUP_VARIANTS: Record<CommentClassification["intent"], string[]> = 
   ],
 };
 
-function buildPublicReply(
-  intent: CommentClassification["intent"],
-  _originalMessage: string
-): string {
+function buildPublicReply(intent: CommentClassification["intent"]): string {
   return pickRandom(PUBLIC_REPLY_VARIANTS[intent] ?? PUBLIC_REPLY_VARIANTS.unknown);
 }
 

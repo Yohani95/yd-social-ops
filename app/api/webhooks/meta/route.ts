@@ -107,10 +107,22 @@ async function handleMessenger(body: unknown) {
 }
 
 async function handleInstagram(body: unknown) {
-  // Fase 3: detectar evento de comentario antes de intentar parsear como DM
-  const igComment = parseInstagramComment(body);
-  if (igComment) {
-    await handleInstagramComment(igComment, body);
+  // Fase 3: detectar eventos de comentarios antes de intentar parsear como DM.
+  const igComments = parseInstagramComments(body);
+  if (igComments.length > 0) {
+    console.info("[Meta Webhook] Instagram: comentarios detectados =", igComments.length);
+
+    for (const comment of igComments) {
+      try {
+        await handleInstagramComment(comment);
+      } catch (error) {
+        console.error("[Meta Webhook] IGComment: error procesando comentario", {
+          entryId: comment.entryId,
+          commentId: comment.commentId,
+          error,
+        });
+      }
+    }
     return;
   }
 
@@ -150,7 +162,7 @@ async function handleInstagram(body: unknown) {
  * Parsea un payload de comentario de Instagram.
  * Meta envía: entry[].changes[].field === 'comments' con value.{id, from, text, media}
  */
-function parseInstagramComment(body: unknown): {
+interface InstagramParsedComment {
   entryId: string;
   commentId: string;
   mediaId: string;
@@ -158,7 +170,9 @@ function parseInstagramComment(body: unknown): {
   fromUsername?: string;
   message: string;
   timestamp: number;
-} | null {
+}
+
+function parseInstagramComments(body: unknown): InstagramParsedComment[] {
   try {
     const data = body as {
       object?: string;
@@ -177,33 +191,36 @@ function parseInstagramComment(body: unknown): {
       }>;
     };
 
-    if (data?.object !== "instagram") return null;
+    if (data?.object !== "instagram" || !Array.isArray(data.entry)) return [];
 
-    const entry = data?.entry?.[0];
-    const change = entry?.changes?.[0];
-    if (change?.field !== "comments") return null;
+    const comments: InstagramParsedComment[] = [];
+    for (const entry of data.entry) {
+      if (!Array.isArray(entry?.changes)) continue;
+      for (const change of entry.changes) {
+        if (change?.field !== "comments") continue;
 
-    const value = change.value;
-    if (!value?.id || !value?.from?.id || !value?.text) return null;
+        const value = change.value;
+        if (!value?.id || !value?.from?.id || !value?.text) continue;
 
-    return {
-      entryId: entry?.id ?? "",
-      commentId: value.id,
-      mediaId: value.media?.id ?? "",
-      fromId: value.from.id,
-      fromUsername: value.from.username,
-      message: value.text,
-      timestamp: value.timestamp ?? Date.now(),
-    };
+        comments.push({
+          entryId: entry?.id ?? "",
+          commentId: value.id,
+          mediaId: value.media?.id ?? "",
+          fromId: value.from.id,
+          fromUsername: value.from.username,
+          message: value.text,
+          timestamp: value.timestamp ?? Date.now(),
+        });
+      }
+    }
+
+    return comments;
   } catch {
-    return null;
+    return [];
   }
 }
 
-async function handleInstagramComment(
-  comment: NonNullable<ReturnType<typeof parseInstagramComment>>,
-  _originalBody: unknown
-): Promise<void> {
+async function handleInstagramComment(comment: InstagramParsedComment): Promise<void> {
   // Buscar canal IG por entry ID (page_id o ig_account_id)
   let channel = await findChannelByProviderConfig("instagram", "ig_account_id", comment.entryId);
   if (!channel) {
@@ -228,7 +245,6 @@ async function handleInstagramComment(
 
   await processInstagramComment({
     tenantId: channel.tenant_id,
-    channelId: channel.id,
     accessToken: channel.access_token,
     event: {
       comment_id: comment.commentId,
