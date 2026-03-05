@@ -30,6 +30,8 @@ export interface DashboardStats {
   totalContacts: number;
   messagesLast7Days: number;
   messagesLast30Days: number;
+  unansweredThreads: number;
+  botResponseRate: number; // 0-1 fraction
   channelBreakdown: ChannelStat[];
   messagesPerDay: DailyMessages[];
   intentBreakdown: IntentStat[];
@@ -55,11 +57,13 @@ export async function getDashboardStats(): Promise<DashboardStats | null> {
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [statsResult, productsResult, recentLogsResult, contactsResult, last7Result, last30Result] =
+  const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString();
+
+  const [statsResult, productsResult, recentLogsResult, contactsResult, last7Result, last30Result, unansweredResult] =
     await Promise.all([
       supabase
         .from("chat_logs")
-        .select("intent_detected, payment_link, channel, created_at")
+        .select("intent_detected, payment_link, channel, created_at, bot_response")
         .eq("tenant_id", tenantId),
       supabase
         .from("products")
@@ -85,10 +89,18 @@ export async function getDashboardStats(): Promise<DashboardStats | null> {
         .select("id", { count: "exact", head: true })
         .eq("tenant_id", tenantId)
         .gte("created_at", thirtyDaysAgo),
+      supabase
+        .from("conversation_threads")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("status", "open")
+        .lt("last_message_at", twoHoursAgo),
     ]);
 
   const logs = statsResult.data || [];
   const products = productsResult.data || [];
+  const withBotResponse = logs.filter((l) => l.bot_response).length;
+  const botResponseRate = logs.length > 0 ? withBotResponse / logs.length : 0;
 
   // Channel breakdown
   const channelMap = new Map<string, ChannelStat>();
@@ -149,6 +161,8 @@ export async function getDashboardStats(): Promise<DashboardStats | null> {
     totalContacts: contactsResult.count || 0,
     messagesLast7Days: last7Result.count || 0,
     messagesLast30Days: last30Result.count || 0,
+    unansweredThreads: unansweredResult.count || 0,
+    botResponseRate,
     channelBreakdown: Array.from(channelMap.values()).sort((a, b) => b.count - a.count),
     messagesPerDay: Array.from(dayMap.values()),
     intentBreakdown,

@@ -21,6 +21,7 @@ import {
   KeyRound,
   BookOpen,
   BarChart2,
+  Code2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -71,6 +72,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: "Base de Conocimiento", href: "/dashboard/knowledge", icon: BookOpen },
       { label: "Métricas de Calidad", href: "/dashboard/quality", icon: BarChart2 },
+      { label: "API Docs", href: "/dashboard/api-docs", icon: Code2 },
     ],
   },
   {

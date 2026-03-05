@@ -15,6 +15,9 @@ import {
   FileText,
   Tag,
   RefreshCw,
+  Lightbulb,
+  MessageSquare,
+  Sparkles,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { useDashboard } from "@/components/dashboard/dashboard-context";
+import { getRecentLogsForTraining, type TrainingLog } from "@/actions/chat-logs";
 
 type KnowledgeChunk = {
   id: string;
@@ -59,6 +63,16 @@ export default function KnowledgePage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  // Guide collapsed state
+  const [showGuide, setShowGuide] = useState(false);
+
+  // Train from logs state
+  const [showTrainLogs, setShowTrainLogs] = useState(false);
+  const [logs, setLogs] = useState<TrainingLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [selectedLogIds, setSelectedLogIds] = useState<Set<string>>(new Set());
+  const [importingLogs, setImportingLogs] = useState(false);
 
   // Import form state
   const [importSource, setImportSource] = useState<string>("faq");
@@ -150,6 +164,53 @@ export default function KnowledgePage() {
     }
   }
 
+  async function handleLoadLogs() {
+    setLogsLoading(true);
+    try {
+      const data = await getRecentLogsForTraining(30);
+      setLogs(data);
+      if (data.length === 0) toast.info("No hay conversaciones recientes de compra o consulta");
+    } catch (err) {
+      console.error(err);
+      toast.error("Error al cargar conversaciones");
+    } finally {
+      setLogsLoading(false);
+    }
+  }
+
+  async function handleImportLogs() {
+    if (selectedLogIds.size === 0) {
+      toast.error("Selecciona al menos una conversación");
+      return;
+    }
+    setImportingLogs(true);
+    try {
+      const selected = logs.filter((l) => selectedLogIds.has(l.id));
+      const chunks_payload = selected.map((l) => ({
+        content: `Pregunta del cliente: ${l.user_message}\nRespuesta del bot: ${l.bot_response}`,
+        metadata: { origin: "chat_log", intent: l.intent_detected, channel: l.channel, log_id: l.id },
+      }));
+
+      const res = await fetch("/api/bot/knowledge/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "chat_logs", topic: "conversaciones_reales", chunks: chunks_payload }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast.success(`${data.data.imported} conversación(es) importada(s) como conocimiento`);
+        setSelectedLogIds(new Set());
+        fetchChunks();
+      } else {
+        toast.error(data.error || "Error al importar");
+      }
+    } catch {
+      toast.error("Error de red");
+    } finally {
+      setImportingLogs(false);
+    }
+  }
+
   const filtered = chunks.filter((c) => {
     const matchSearch =
       !searchQuery ||
@@ -196,6 +257,222 @@ export default function KnowledgePage() {
             <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
           </div>
         ))}
+      </div>
+
+      {/* Training guide — collapsible */}
+      <div className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/10 overflow-hidden">
+        <button
+          className="w-full flex items-center justify-between px-4 py-3 text-left"
+          onClick={() => setShowGuide(!showGuide)}
+        >
+          <div className="flex items-center gap-2">
+            <Lightbulb className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+            <span className="text-sm font-medium text-amber-800 dark:text-amber-300">
+              Guía para entrenar el bot — ¿Qué importar por fuente?
+            </span>
+          </div>
+          {showGuide ? (
+            <ChevronUp className="w-4 h-4 text-amber-600" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-amber-600" />
+          )}
+        </button>
+        {showGuide && (
+          <div className="px-4 pb-4 space-y-3 border-t border-amber-200 dark:border-amber-900 pt-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              {[
+                {
+                  source: "faq",
+                  label: "FAQ",
+                  color: "text-blue-700 dark:text-blue-400",
+                  bg: "bg-blue-50 dark:bg-blue-950/30",
+                  border: "border-blue-200 dark:border-blue-900",
+                  examples: [
+                    "¿Cuánto tarda el envío? → 3–5 días hábiles en todo el país.",
+                    "¿Tienen devoluciones? → Sí, hasta 30 días con boleta.",
+                    "¿Trabajan los fines de semana? → Solo sábados de 9 a 14h.",
+                  ],
+                },
+                {
+                  source: "products",
+                  label: "Productos",
+                  color: "text-emerald-700 dark:text-emerald-400",
+                  bg: "bg-emerald-50 dark:bg-emerald-950/30",
+                  border: "border-emerald-200 dark:border-emerald-900",
+                  examples: [
+                    "Cabaña Premium — $85.000/noche, máx 4 personas, WiFi, vista al lago.",
+                    "Pack Familiar — 3 noches + desayuno incluido por $195.000.",
+                    "Habitación Doble — $45.000/noche, cama queen, TV 50'.",
+                  ],
+                },
+                {
+                  source: "services",
+                  label: "Servicios / Procesos",
+                  color: "text-purple-700 dark:text-purple-400",
+                  bg: "bg-purple-50 dark:bg-purple-950/30",
+                  border: "border-purple-200 dark:border-purple-900",
+                  examples: [
+                    "Proceso de reserva: 1) elige fecha, 2) paga señal de 30%, 3) confirmo disponibilidad.",
+                    "Las consultas de diseño duran 1h por videollamada, se agenda por este chat.",
+                    "El servicio incluye instalación gratuita dentro de Santiago.",
+                  ],
+                },
+                {
+                  source: "manual",
+                  label: "Manual / Instrucciones del bot",
+                  color: "text-slate-700 dark:text-slate-400",
+                  bg: "bg-slate-50 dark:bg-slate-950/30",
+                  border: "border-slate-200 dark:border-slate-800",
+                  examples: [
+                    "Ejemplo de respuesta ideal a queja: 'Lamento el inconveniente, voy a escalarlo de inmediato...'",
+                    "Cuando pregunten por precio, siempre mencionar el descuento vigente del 10%.",
+                    "No dar fechas exactas de stock, solo decir 'consultar disponibilidad'.",
+                  ],
+                },
+              ].map(({ source, label, color, bg, border, examples }) => (
+                <div key={source} className={`rounded-lg border ${border} ${bg} p-3 space-y-1.5`}>
+                  <p className={`font-semibold ${color}`}>{label}</p>
+                  <ul className="space-y-1 text-muted-foreground">
+                    {examples.map((ex, i) => (
+                      <li key={i} className="flex gap-1.5">
+                        <span className="text-muted-foreground/50">•</span>
+                        <span>{ex}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              <strong>Tip:</strong> Separa múltiples entradas con <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">---</code> en una línea sola.
+              Cuanto más específico y concreto sea el chunk, mejor responderá el bot.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Train from chat logs */}
+      <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+        <button
+          className="w-full flex items-center justify-between px-4 py-3 text-left"
+          onClick={() => {
+            setShowTrainLogs(!showTrainLogs);
+            if (!showTrainLogs && logs.length === 0) handleLoadLogs();
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-indigo-500" />
+            <span className="text-sm font-medium">Entrenar desde conversaciones reales</span>
+            <Badge variant="secondary" className="text-[11px]">Nuevo</Badge>
+          </div>
+          {showTrainLogs ? (
+            <ChevronUp className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          )}
+        </button>
+
+        {showTrainLogs && (
+          <div className="border-t border-border/60 p-4 space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Selecciona conversaciones reales del bot (últimas 2 semanas) con intención de compra o consulta
+              para importarlas como conocimiento. Esto mejora la coherencia de las respuestas futuras.
+            </p>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleLoadLogs}
+                disabled={logsLoading}
+                className="gap-2"
+              >
+                {logsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                Recargar conversaciones
+              </Button>
+              {selectedLogIds.size > 0 && (
+                <Button
+                  size="sm"
+                  onClick={handleImportLogs}
+                  disabled={importingLogs}
+                  className="gap-2"
+                >
+                  {importingLogs ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                  Importar {selectedLogIds.size} seleccionada(s)
+                </Button>
+              )}
+              {logs.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setSelectedLogIds(
+                      selectedLogIds.size === logs.length
+                        ? new Set()
+                        : new Set(logs.map((l) => l.id))
+                    )
+                  }
+                  className="text-xs"
+                >
+                  {selectedLogIds.size === logs.length ? "Deseleccionar todo" : "Seleccionar todo"}
+                </Button>
+              )}
+            </div>
+
+            {logsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : logs.length === 0 ? (
+              <div className="text-center py-8 text-sm text-muted-foreground border border-dashed rounded-xl">
+                <MessageSquare className="w-6 h-6 mx-auto mb-2 text-muted-foreground/40" />
+                No hay conversaciones recientes con intent de compra o consulta
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                {logs.map((log) => (
+                  <label
+                    key={log.id}
+                    className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                      selectedLogIds.has(log.id)
+                        ? "border-indigo-300 dark:border-indigo-700 bg-indigo-50/50 dark:bg-indigo-950/20"
+                        : "border-border/60 hover:bg-muted/40"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 shrink-0"
+                      checked={selectedLogIds.has(log.id)}
+                      onChange={(e) => {
+                        const next = new Set(selectedLogIds);
+                        if (e.target.checked) next.add(log.id);
+                        else next.delete(log.id);
+                        setSelectedLogIds(next);
+                      }}
+                    />
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-[10px] h-4">
+                          {log.intent_detected === "purchase_intent" ? "Compra" : "Consulta"}
+                        </Badge>
+                        <span className="text-[11px] text-muted-foreground">{log.channel}</span>
+                        <span className="text-[11px] text-muted-foreground ml-auto">
+                          {new Date(log.created_at).toLocaleDateString("es-CL")}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-1">
+                        <strong>Cliente:</strong> {log.user_message}
+                      </p>
+                      <p className="text-xs text-muted-foreground line-clamp-1">
+                        <strong>Bot:</strong> {log.bot_response}
+                      </p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Import panel */}

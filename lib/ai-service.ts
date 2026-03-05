@@ -353,6 +353,69 @@ REGLAS PARA RESERVAS (SERVICIOS):
 
       if (usePaymentTool) {
         const adHocMode = tenant.merchant_ad_hoc_link_mode || "approval";
+        const hasBankDetails = !!tenant.bank_details?.trim();
+        const bankDetailsText = hasBankDetails ? tenant.bank_details!.trim() : null;
+
+        // Modo dual: MP OAuth + datos bancarios configurados
+        if (hasBankDetails && bankDetailsText) {
+          if (isServicesBusiness) {
+            return `METODO DE PAGO (DOS OPCIONES DISPONIBLES):
+El cliente puede elegir como pagar. Presenta ambas opciones y pregunta cual prefiere.
+
+REGLAS PARA RESERVAS (SERVICIOS):
+- Antes de mencionar precios o generar pagos, recopila los datos necesarios (fecha, horario, cantidad de personas u otros segun el servicio).
+- Solo cuando tengas todos los datos de la reserva, ofrece las opciones de pago.
+
+OPCION 1 — Link de pago personalizado (recomendado para el monto acordado):
+- Usa "generate_custom_payment_link" con el monto exacto de la reserva confirmada.
+- NO uses generate_payment_link para servicios (los precios dependen de fechas/disponibilidad).
+
+OPCION 2 — Transferencia bancaria:
+${bankDetailsText}
+- El cliente envia el comprobante por este mismo chat.
+
+Si el cliente elige transferencia, comparte los datos completos.
+Si elige link, genera el link con generate_custom_payment_link para el monto acordado.
+- Modo ad-hoc: ${adHocMode}.`;
+          }
+
+          return `METODO DE PAGO (DOS OPCIONES DISPONIBLES):
+El cliente puede elegir como pagar. Cuando quiera comprar, presenta ambas opciones:
+
+OPCION 1 — Link de pago automatico (recomendado):
+1. Confirma que producto quiere y la cantidad.
+2. Verifica stock/disponibilidad.
+3. Llama a "generate_payment_link" con el product_id correspondiente.
+4. Comparte el link generado sin modificarlo.
+- Si el cliente pide un cobro personalizado, usa "generate_custom_payment_link".
+- Modo ad-hoc: ${adHocMode}.
+
+OPCION 2 — Transferencia bancaria:
+${bankDetailsText}
+- El cliente envia el comprobante por este mismo chat.
+
+DESPUES DE GENERAR UN LINK:
+- Si recibes una URL, compartela directamente. Se natural y amigable.
+- Si el estado es "pending_approval", informa que esta en revision.
+- Si hubo error, ofrece la opcion de transferencia como alternativa.
+- NUNCA inventes URLs. Solo comparte las que el sistema proporciona.`;
+        }
+
+        // Solo MP OAuth (sin datos bancarios)
+        if (isServicesBusiness) {
+          return `METODO DE PAGO (LINK PERSONALIZADO PARA SERVICIOS):
+REGLAS PARA RESERVAS (SERVICIOS):
+- Antes de generar un pago, recopila los datos necesarios (fecha, horario, cantidad de personas u otros segun el servicio).
+- Solo cuando tengas todos los datos confirmados, usa "generate_custom_payment_link" con el monto exacto acordado.
+- NO uses generate_payment_link directo para servicios.
+- Modo ad-hoc: ${adHocMode}.
+
+DESPUES DE GENERAR UN LINK:
+- Si recibes una URL, compartela directamente al cliente.
+- Si el estado es "pending_approval", informa que la solicitud esta en revision.
+- NUNCA inventes URLs de pago.`;
+        }
+
         return `METODO DE PAGO (AUTOMATICO):
 Cuando un cliente quiera comprar:
 1. Confirma que producto/servicio quiere y la cantidad.
@@ -390,6 +453,22 @@ Cuando un cliente quiera comprar:
         "Datos bancarios no configurados. Indica al cliente que contacte directamente al negocio para concretar el pago.";
       const adHocMode = tenant.merchant_ad_hoc_link_mode || "approval";
 
+      if (isServicesBusiness) {
+        return `METODO DE PAGO (TRANSFERENCIA BANCARIA — SERVICIOS):
+Los links de pago automaticos de catalogo NO estan disponibles.
+
+REGLAS PARA RESERVAS (SERVICIOS):
+- Antes de dar datos de pago, recopila los datos necesarios (fecha, horario, cantidad de personas u otros segun el servicio).
+- Solo cuando el cliente confirme que quiere reservar y tengas todos los datos, comparte los datos de transferencia.
+- Si el monto es variable o personalizado, usa "generate_custom_payment_link" con el monto acordado.
+
+DATOS DE TRANSFERENCIA (incluir completos cuando el cliente confirme la reserva):
+${bankDetails}
+
+- Indica al cliente que envie el comprobante por este mismo chat.
+- Modo ad-hoc: ${adHocMode}.`;
+      }
+
       return `METODO DE PAGO (TRANSFERENCIA BANCARIA):
 Los links de pago automaticos NO estan disponibles. Tu UNICA opcion es compartir los datos de transferencia.
 
@@ -404,7 +483,7 @@ ${bankDetails}
 - Indica al cliente que envie el comprobante por este mismo chat o WhatsApp.
 - NO ofrezcas links de pago de producto ni menciones Mercado Pago automatico (no esta disponible para catalogo).
 - Si el cliente pide un cobro extra/reserva con monto personalizado, usa "generate_custom_payment_link".
-- Modo ad-hoc actual del tenant: ${adHocMode}.${servicesRules}`;
+- Modo ad-hoc actual del tenant: ${adHocMode}.`;
     }
   }
 }

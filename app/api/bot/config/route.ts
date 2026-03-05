@@ -1,3 +1,5 @@
+// @deprecated - La UI interna usa actions/bot-config.ts (getBotConfig, updateBotConfig).
+// Esta ruta se mantiene para integraciones externas que ya la usen via API Key.
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedContext } from "@/lib/supabase/server";
 import type { TenantBotConfig } from "@/types";

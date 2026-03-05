@@ -148,14 +148,28 @@ export async function processInstagramComment(params: {
     return;
   }
 
-  // 2. Leer regla de automatización
-  const { data: rule } = await supabase
-    .from("channel_automation_rules")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .eq("channel", "instagram")
-    .eq("event_type", "comment")
-    .maybeSingle();
+  // 2. Leer regla de automatización + config del tenant
+  const [{ data: rule }, { data: botConfig }] = await Promise.all([
+    supabase
+      .from("channel_automation_rules")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("channel", "instagram")
+      .eq("event_type", "comment")
+      .maybeSingle(),
+    supabase
+      .from("tenant_bot_configs")
+      .select("channel_overrides")
+      .eq("tenant_id", tenantId)
+      .maybeSingle(),
+  ]);
+
+  // Leer config de respuesta pública al abrir DM
+  const igOverrides = (botConfig?.channel_overrides as Record<string, Record<string, unknown>> | null)?.instagram ?? {};
+  const dmPublicAckEnabled = igOverrides.dm_public_ack_enabled === true;
+  const dmPublicAckText = typeof igOverrides.dm_public_ack_text === "string" && igOverrides.dm_public_ack_text.trim()
+    ? igOverrides.dm_public_ack_text.trim()
+    : "¡Hola! Te envío la información por mensaje directo 💬";
 
   const isActive = rule?.is_active ?? false;
   const confidenceThreshold = Number(rule?.confidence_threshold ?? 0.7);
@@ -205,6 +219,17 @@ export async function processInstagramComment(params: {
 
     const dmText = buildDmFollowup(classification.intent);
     await sendDmToUser(event.from_id, dmText, accessToken);
+
+    // Respuesta pública de acuse cuando se abre DM (configurable por tenant)
+    if (dmPublicAckEnabled) {
+      try {
+        const ackText = applyAckTemplate(dmPublicAckText, event.from_username, classification.intent);
+        await sendCommentReply(event.comment_id, ackText, accessToken);
+        console.info("[IGComments] Acuse público de DM enviado para", event.comment_id);
+      } catch (err) {
+        console.warn("[IGComments] No se pudo enviar acuse público de DM:", err);
+      }
+    }
 
     await recordInboundThreadMessage({
       tenantId,
@@ -301,38 +326,109 @@ export async function processInstagramComment(params: {
 }
 
 // ============================================================
-// Reply builders
+// Reply builders — variantes múltiples para evitar repetición
 // ============================================================
+
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+const PUBLIC_REPLY_VARIANTS: Record<CommentClassification["intent"], string[]> = {
+  purchase_intent: [
+    "¡Hola! Te enviamos toda la info por mensaje directo 😊",
+    "¡Claro! Te mando los detalles por DM ahora mismo 📩",
+    "¡Hola! Revisa tu DM, te envío la información 💬",
+    "¡Con gusto! Te escribo por privado con todo lo que necesitas 🙌",
+  ],
+  inquiry: [
+    "¡Gracias por tu consulta! Te respondemos por DM con todos los detalles.",
+    "¡Buena pregunta! Te escribimos por privado para ayudarte mejor 📩",
+    "¡Hola! Te enviamos la respuesta completa por mensaje directo 💬",
+    "¡Claro que sí! Revisa tu DM, te explicamos todo 😊",
+  ],
+  complaint: [
+    "Lamentamos el inconveniente, te contactamos por DM para resolverlo.",
+    "Entendemos tu situación, te escribimos por privado para ayudarte 🙏",
+    "¡Hola! Ya te envié un DM para solucionar esto cuanto antes.",
+    "Nos importa tu experiencia, revisa tu DM para que te atendamos 💬",
+  ],
+  greeting: [
+    "¡Hola! 👋 ¿En qué podemos ayudarte? Te escribimos por DM.",
+    "¡Bienvenido/a! Revisa tu DM, estamos para servirte 😊",
+    "¡Hola! Encantados de saludarte. Te enviamos un DM 👋",
+    "¡Buenas! Cuéntanos en qué te podemos ayudar, ya te escribimos 💬",
+  ],
+  unknown: [
+    "¡Gracias por tu comentario! Escríbenos por DM para más info.",
+    "¡Hola! Te enviamos un mensaje directo para ayudarte mejor 💬",
+    "¡Gracias! Revisa tu DM, te contactamos ahora 📩",
+    "¡Hola! Charlemos por privado para ayudarte de la mejor manera 😊",
+  ],
+};
+
+const DM_FOLLOWUP_VARIANTS: Record<CommentClassification["intent"], string[]> = {
+  purchase_intent: [
+    "¡Hola! Vi tu comentario y quiero ayudarte con la información. ¿Qué producto o servicio te interesa?",
+    "¡Hola! Noté tu consulta y con gusto te ayudo. ¿Qué necesitas saber sobre precios o disponibilidad?",
+    "¡Buenas! Vi que estás interesado/a. Cuéntame qué necesitas y te ayudo 😊",
+    "¡Hola! Aquí para ayudarte con lo que necesites. ¿Qué estás buscando?",
+  ],
+  inquiry: [
+    "¡Hola! Vi tu consulta y con gusto te ayudo. ¿Qué necesitas saber?",
+    "¡Buenas! Cuéntame tu pregunta en detalle y te respondo todo 😊",
+    "¡Hola! Estoy aquí para resolver tus dudas. ¿En qué puedo ayudarte?",
+    "¡Hola! Vi tu mensaje, dime qué necesitas y lo resolvemos juntos 💬",
+  ],
+  complaint: [
+    "Hola, lamento que hayas tenido un inconveniente. Cuéntame qué pasó y lo resolvemos.",
+    "¡Hola! Entiendo tu molestia, estoy aquí para ayudarte. ¿Qué ocurrió?",
+    "Hola, nos importa mucho tu experiencia. Cuéntame el problema y lo solucionamos.",
+    "¡Hola! Vi tu comentario y quiero ayudarte a resolver esto cuanto antes. ¿Qué pasó?",
+  ],
+  greeting: [
+    "¡Hola! Gracias por escribirnos. ¿En qué te podemos ayudar hoy?",
+    "¡Bienvenido/a! Cuéntame en qué puedo ayudarte 😊",
+    "¡Hola! Encantados de saludarte. ¿Qué necesitas?",
+    "¡Buenas! Dime cómo puedo ayudarte 🙌",
+  ],
+  unknown: [
+    "¡Hola! Gracias por escribirnos. ¿En qué te podemos ayudar?",
+    "¡Hola! Vi tu comentario. ¿En qué puedo ayudarte hoy? 😊",
+    "¡Buenas! Cuéntame qué necesitas y con gusto te ayudo 💬",
+    "¡Hola! Dime en qué puedo servirte 🙌",
+  ],
+};
 
 function buildPublicReply(
   intent: CommentClassification["intent"],
   _originalMessage: string
 ): string {
-  switch (intent) {
-    case "purchase_intent":
-      return "¡Hola! Te enviamos la información por mensaje directo 😊";
-    case "inquiry":
-      return "¡Gracias por tu consulta! Te respondemos por DM con todos los detalles.";
-    case "complaint":
-      return "Lamentamos el inconveniente, te contactamos por DM para ayudarte.";
-    case "greeting":
-      return "¡Hola! 👋 ¿En qué podemos ayudarte?";
-    default:
-      return "¡Gracias por tu comentario! Escríbenos por DM para más info.";
-  }
+  return pickRandom(PUBLIC_REPLY_VARIANTS[intent] ?? PUBLIC_REPLY_VARIANTS.unknown);
 }
 
 function buildDmFollowup(intent: CommentClassification["intent"]): string {
-  switch (intent) {
-    case "purchase_intent":
-      return "¡Hola! Vi tu comentario y quiero ayudarte con la información que necesitas. ¿Qué producto o servicio te interesa?";
-    case "inquiry":
-      return "¡Hola! Vi tu consulta y con gusto te ayudo. ¿Qué necesitas saber?";
-    case "complaint":
-      return "Hola, lamento que hayas tenido un inconveniente. Cuéntame qué pasó y lo resolvemos.";
-    default:
-      return "¡Hola! Gracias por escribirnos. ¿En qué te podemos ayudar?";
-  }
+  return pickRandom(DM_FOLLOWUP_VARIANTS[intent] ?? DM_FOLLOWUP_VARIANTS.unknown);
+}
+
+/** Aplica variables de plantilla al texto de acuse público de DM.
+ *  Variables soportadas: {{username}}, {{intent}}
+ */
+function applyAckTemplate(
+  template: string,
+  username: string | undefined,
+  intent: CommentClassification["intent"]
+): string {
+  const intentLabel: Record<string, string> = {
+    purchase_intent: "tu consulta de compra",
+    inquiry: "tu consulta",
+    complaint: "tu comentario",
+    greeting: "tu saludo",
+    unknown: "tu mensaje",
+  };
+  return template
+    .replace(/\{\{username\}\}/gi, username ? `@${username}` : "")
+    .replace(/\{\{intent\}\}/gi, intentLabel[intent] ?? "tu mensaje")
+    .trim();
 }
 
 function mapDecisionToAction(
