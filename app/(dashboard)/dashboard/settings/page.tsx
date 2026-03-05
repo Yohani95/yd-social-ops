@@ -1,12 +1,14 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { SettingsClient } from "@/components/dashboard/settings-client";
 import { useDashboard } from "@/components/dashboard/dashboard-context";
+import { getFeatureFlags } from "@/actions/feature-flags";
 import type { PlanTier } from "@/types";
 
 const VALID_PLAN_TIERS: PlanTier[] = ["basic", "pro", "business", "enterprise", "enterprise_plus"];
-const VALID_TABS = ["general", "integrations", "payments", "enterprise"] as const;
+const VALID_TABS = ["general", "integrations", "payments", "enterprise", "bot"] as const;
 type SettingsTab = (typeof VALID_TABS)[number];
 
 function parseEmbeddedPreapprovalId(mpSubReturnRaw: string | null): string | undefined {
@@ -23,6 +25,13 @@ function parseEmbeddedPreapprovalId(mpSubReturnRaw: string | null): string | und
 export default function SettingsPage() {
   const { tenant, userRole } = useDashboard();
   const searchParams = useSearchParams();
+  const [initialFlags, setInitialFlags] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    getFeatureFlags().then((r) => {
+      if (r.success && r.data) setInitialFlags(r.data);
+    });
+  }, []);
   const subscribePlanRaw = searchParams.get("subscribe_plan");
   const subscribePlan = VALID_PLAN_TIERS.includes(subscribePlanRaw as PlanTier)
     ? (subscribePlanRaw as PlanTier)
@@ -52,6 +61,7 @@ export default function SettingsPage() {
       gmailError={searchParams.get("gmail_error") || undefined}
       initialSaasPlan={subscribePlan}
       initialTab={initialTab}
+      initialFlags={initialFlags}
     />
   );
 }

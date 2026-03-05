@@ -36,6 +36,8 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { getAppUrl } from "@/lib/app-url";
+import { FeatureFlagsPanel } from "@/components/dashboard/feature-flags-panel";
+import { getBotConfig, updateBotConfig } from "@/actions/bot-config";
 import { updateBankDetails, updateTenant, disconnectMP } from "@/actions/tenant";
 import {
   getIntegrationSettings,
@@ -77,7 +79,8 @@ interface SettingsClientProps {
   gmailSuccess?: boolean;
   gmailError?: string;
   initialSaasPlan?: PlanTier;
-  initialTab?: "general" | "integrations" | "payments" | "enterprise";
+  initialTab?: "general" | "integrations" | "payments" | "enterprise" | "bot";
+  initialFlags?: Record<string, boolean>;
 }
 
 interface BillingSubscriptionResponse {
@@ -186,6 +189,7 @@ export function SettingsClient({
   gmailError,
   initialSaasPlan,
   initialTab,
+  initialFlags,
 }: SettingsClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -937,6 +941,7 @@ export function SettingsClient({
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="integrations">Integraciones</TabsTrigger>
           <TabsTrigger value="payments">Pagos</TabsTrigger>
+          <TabsTrigger value="bot">Bot</TabsTrigger>
           {isEnterprisePlan && (
             <TabsTrigger value="enterprise">Enterprise</TabsTrigger>
           )}
@@ -1704,6 +1709,28 @@ export function SettingsClient({
         </TabsContent>
 
 
+        {/* === TAB: BOT === */}
+        <TabsContent value="bot" className="space-y-4 mt-4">
+          <BotConfigCard />
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Bot className="w-4 h-4" />
+                Feature Flags del Bot
+              </CardTitle>
+              <CardDescription>
+                Activa o desactiva funciones del bot por canal. Los cambios aplican en menos de 30 segundos.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <FeatureFlagsPanel
+                initialFlags={initialFlags ?? {}}
+                planTier={tenant?.plan_tier || "basic"}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* === TAB: ENTERPRISE === */}
         {isEnterprisePlan && (
           <TabsContent value="enterprise" className="space-y-4 mt-4">
@@ -1941,6 +1968,184 @@ export function SettingsClient({
         )}
       </Tabs>
     </div>
+  );
+}
+
+// ============================================================
+// BotConfigCard — configuración avanzada del bot
+// ============================================================
+function BotConfigCard() {
+  const [config, setConfig] = useState<{
+    coherence_window_turns: number;
+    repetition_guard_enabled: boolean;
+    fallback_to_human_enabled: boolean;
+    fallback_confidence_threshold: number;
+    max_response_chars_by_channel: Record<string, number>;
+  }>({
+    coherence_window_turns: 10,
+    repetition_guard_enabled: true,
+    fallback_to_human_enabled: false,
+    fallback_confidence_threshold: 0.4,
+    max_response_chars_by_channel: {},
+  });
+  const [loading, setLoading] = useState(true);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    getBotConfig().then((r) => {
+      if (r.success && r.data) {
+        setConfig({
+          coherence_window_turns: r.data.coherence_window_turns ?? 10,
+          repetition_guard_enabled: r.data.repetition_guard_enabled ?? true,
+          fallback_to_human_enabled: r.data.fallback_to_human_enabled ?? false,
+          fallback_confidence_threshold: Number(r.data.fallback_confidence_threshold ?? 0.4),
+          max_response_chars_by_channel: (r.data.max_response_chars_by_channel as Record<string, number>) ?? {},
+        });
+      }
+      setLoading(false);
+    });
+  }, []);
+
+  function save() {
+    startTransition(async () => {
+      const result = await updateBotConfig({
+        coherence_window_turns: config.coherence_window_turns,
+        repetition_guard_enabled: config.repetition_guard_enabled,
+        fallback_to_human_enabled: config.fallback_to_human_enabled,
+        fallback_confidence_threshold: config.fallback_confidence_threshold,
+        max_response_chars_by_channel: config.max_response_chars_by_channel,
+      });
+      if (result.success) {
+        toast.success("Configuración del bot guardada");
+      } else {
+        toast.error(result.error || "Error al guardar");
+      }
+    });
+  }
+
+  const CHANNELS = ["web", "whatsapp", "messenger", "instagram", "tiktok"];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Zap className="w-4 h-4" />
+          Configuración Avanzada del Bot
+        </CardTitle>
+        <CardDescription>
+          Comportamiento del bot: guardia de repetición, tamaño de respuestas, handoff humano.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <>
+            {/* Toggles */}
+            <div className="space-y-3">
+              {[
+                {
+                  key: "repetition_guard_enabled" as const,
+                  label: "Guardia de repetición",
+                  description: "Detecta y marca respuestas repetitivas. Requiere flag quality_tracking_enabled.",
+                },
+                {
+                  key: "fallback_to_human_enabled" as const,
+                  label: "Handoff a humano",
+                  description: "Cuando la confianza cae bajo el umbral, el thread se marca para atención humana.",
+                },
+              ].map(({ key, label, description }) => (
+                <div key={key} className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium">{label}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={config[key]}
+                    onClick={() => setConfig((c) => ({ ...c, [key]: !c[key] }))}
+                    className={`relative flex-shrink-0 inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${config[key] ? "bg-indigo-600" : "bg-gray-200"}`}
+                  >
+                    <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transform transition-transform duration-200 ${config[key] ? "translate-x-4" : "translate-x-0.5"}`} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <Separator />
+
+            {/* Numeric fields */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Ventana de coherencia (turnos)</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={config.coherence_window_turns}
+                  onChange={(e) => setConfig((c) => ({ ...c, coherence_window_turns: Number(e.target.value) }))}
+                />
+                <p className="text-xs text-muted-foreground">Mensajes anteriores a considerar para detectar repetición</p>
+              </div>
+              {config.fallback_to_human_enabled && (
+                <div className="space-y-1.5">
+                  <Label>Umbral de confianza para handoff (0–1)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={config.fallback_confidence_threshold}
+                    onChange={(e) => setConfig((c) => ({ ...c, fallback_confidence_threshold: Number(e.target.value) }))}
+                  />
+                  <p className="text-xs text-muted-foreground">Confianza mínima antes de pasar a agente humano</p>
+                </div>
+              )}
+            </div>
+
+            <Separator />
+
+            {/* Max chars by channel */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Longitud máxima de respuesta por canal</p>
+              <p className="text-xs text-muted-foreground">0 = sin límite</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {CHANNELS.map((ch) => (
+                  <div key={ch} className="space-y-1">
+                    <Label className="text-xs capitalize">{ch}</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={50}
+                      placeholder="0"
+                      value={config.max_response_chars_by_channel[ch] ?? ""}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          max_response_chars_by_channel: {
+                            ...c.max_response_chars_by_channel,
+                            [ch]: Number(e.target.value) || 0,
+                          },
+                        }))
+                      }
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <Button onClick={save} disabled={isPending}>
+              {isPending && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+              Guardar configuración
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

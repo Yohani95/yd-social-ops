@@ -5,6 +5,9 @@ import { createMerchantPaymentLink } from "@/lib/merchant-payment-links";
 import { notifyN8n } from "@/lib/integrations/n8n";
 import { callAI, callAIWithToolResult, type AIMessage, type AITool } from "@/lib/ai-providers";
 import { sendWelcomeEmail, sendOwnerNewMessageAlertEmail } from "@/lib/email";
+import { recordQualityEvent, detectRepetition } from "@/lib/quality-tracker";
+import { isFeatureEnabled } from "@/lib/feature-flags";
+import { retrieveContext } from "@/lib/rag-retrieval";
 import type { BotRequest, BotResponse, CaptureContactPayload, Product, Tenant } from "@/types";
 
 type IndustryTemplate =
@@ -969,14 +972,28 @@ interface ApprovedPaymentMatch {
 function shouldCheckPaidStatus(message: string): boolean {
   const lower = message.toLowerCase();
   const patterns = [
-    /ya\s+pague/i,
+    // Afirmaciones directas de pago
     /ya\s+pagu[eé]/i,
-    /listo\s+ya\s+lo\s+pague/i,
+    /listo\s+ya\s+lo\s+pagu[eé]/i,
     /pago\s+realizado/i,
     /se\s+acredit[oó]/i,
-    /puedes\s+comprobar\s+si\s+lo\s+pague/i,
+    /transfer[íi]\s*(ya|listo)/i,
+    /hice\s+la\s+transferencia/i,
+    /ya\s+transfer[íi]/i,
+    /ya\s+realic[eé]\s+el\s+pago/i,
+    // Solicitudes de verificación
+    /puedes\s+comprobar\s+si\s+lo\s+pagu[eé]/i,
     /verifica(r)?\s+mi\s+pago/i,
     /rev(isa|isar)\s+mi\s+pago/i,
+    /compruebas?\s+(el\s+pago|mi\s+pago|si\s+pagu[eé])/i,
+    // Preguntas de seguimiento (fix: evita hallucination)
+    /recibiste\s+(la\s+confirmaci[oó]n|el\s+pago|mi\s+pago)/i,
+    /lleg[oó]\s+(el\s+pago|mi\s+pago|la\s+confirmaci[oó]n)/i,
+    /se\s+proces[oó]\s+mi\s+pago/i,
+    /se\s+confirm[oó]\s+el\s+pago/i,
+    /ya\s+aparece\s+(el\s+pago|mi\s+compra)/i,
+    /puedo\s+ver\s+(mi\s+pago|la\s+confirmaci[oó]n)/i,
+    /qued[oó]\s+(registrado|confirmado)\s+el\s+pago/i,
   ];
   return patterns.some((pattern) => pattern.test(lower));
 }
@@ -1087,6 +1104,7 @@ async function findRecentApprovedPaymentForConversation(params: {
 export async function processMessage(
   request: BotRequest
 ): Promise<BotResponse> {
+  const processStartMs = Date.now();
   const { tenant_id } = request;
   const rawUserMessage = request.user_message;
   const sanitizedUserMessage = sanitizeUserInput(rawUserMessage) || "Hola";
@@ -1147,9 +1165,51 @@ export async function processMessage(
         product_id: approvedPayment.productId || undefined,
       };
     }
+
+    // Pago aún no confirmado: respuesta determinista para evitar que la IA invente
+    const pendingMessage =
+      "Aun no tenemos confirmacion de tu pago en el sistema. Los pagos pueden tardar algunos minutos en procesarse. Si ya realizaste la transferencia, espera unos minutos e intentalo nuevamente. Si el problema persiste, contacta directamente al negocio.";
+
+    await saveChatLog({
+      tenant_id,
+      user_message: rawUserMessage,
+      bot_response: pendingMessage,
+      intent_detected: "purchase_intent",
+      product_id: undefined,
+      payment_link: undefined,
+      session_id: request.session_id,
+      user_identifier: request.user_identifier,
+      channel: request.channel || "web",
+      tokens_used: 0,
+    });
+
+    await upsertConversationMemory({
+      tenantId: tenant_id,
+      sessionId: request.session_id,
+      userMessage: rawUserMessage,
+      botMessage: pendingMessage,
+      intent: "purchase_intent",
+    });
+
+    return {
+      message: pendingMessage,
+      intent_detected: "purchase_intent",
+    };
   }
 
-  const systemPrompt = buildSystemPrompt(tenant, products, mcpServers);
+  // Fase 4: RAG — enriquece el system prompt si el feature flag está activo
+  let ragContext = "";
+  const ragEnabled = await isFeatureEnabled(tenant_id, "rag_enabled");
+  if (ragEnabled) {
+    ragContext = await retrieveContext(
+      tenant_id,
+      request.channel || "web",
+      "inquiry",
+      sanitizedUserMessage
+    );
+  }
+
+  const systemPrompt = buildSystemPrompt(tenant, products, mcpServers) + ragContext;
   const useCatalogPaymentTool =
     (tenant.contact_action || "payment_link") === "payment_link" &&
     tenant.merchant_checkout_mode === "mp_oauth" &&
@@ -1304,6 +1364,30 @@ export async function processMessage(
 
   const intent = detectIntent(sanitizedUserMessage, paymentLink);
   const finalMessage = sanitizeBotResponse(aiResponse.content || "No pude procesar tu mensaje.");
+
+  // Fase 1: instrumentación de calidad (fire-and-forget, no bloquea latencia)
+  const prevBotMessages = chatHistory
+    .filter((m) => m.role === "assistant")
+    .map((m) => (typeof m.content === "string" ? m.content : ""));
+  const isRepetition = detectRepetition(prevBotMessages, finalMessage);
+  const primaryProvider = (process.env.AI_PROVIDER || "groq").toLowerCase();
+  const isFallback = !!aiResponse.provider && aiResponse.provider.toLowerCase() !== primaryProvider;
+
+  void recordQualityEvent({
+    tenantId: tenant_id,
+    channel: request.channel || "web",
+    eventType: "dm",
+    sessionId: request.session_id || null,
+    userIdentifier: request.user_identifier || null,
+    userMessageLength: rawUserMessage.length,
+    responseLength: finalMessage.length,
+    responseLatencyMs: Date.now() - processStartMs,
+    intentDetected: intent ?? null,
+    providerUsed: aiResponse.provider || null,
+    tokensUsed: aiResponse.tokensUsed || 0,
+    isFallbackResponse: isFallback,
+    isRepetition,
+  });
 
   await saveChatLog({
     tenant_id,
