@@ -16,6 +16,8 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { recordConversationEvent, recordQualityEvent } from "@/lib/quality-tracker";
 import { recordInboundThreadMessage, recordOutboundThreadMessage } from "@/lib/inbox";
 import { ensureContactExists } from "@/lib/contacts";
+import { evaluateWorkflows } from "@/lib/workflow-engine";
+import { isFeatureEnabled } from "@/lib/feature-flags";
 import type { InstagramCommentEvent, CommentDecision } from "@/types";
 
 // ============================================================
@@ -178,7 +180,7 @@ export async function processInstagramComment(params: {
   const classification = classifyComment(event.message);
 
   // 4. Decidir acción
-  const decision = decideAction(classification, confidenceThreshold, allowedActions, isActive);
+  let decision = decideAction(classification, confidenceThreshold, allowedActions, isActive);
 
   console.info(`[IGComments] comment_id=${event.comment_id} intent=${classification.intent} confidence=${classification.confidence} decision=${decision}`);
 
@@ -200,15 +202,73 @@ export async function processInstagramComment(params: {
 
   // 6. Ejecutar acción
   let botReply: string | null = null;
+  let workflowHandled = false;
 
-  if (decision === "public_reply") {
+  const workflowEnabled = await isFeatureEnabled(tenantId, "workflow_engine_enabled");
+  if (workflowEnabled) {
+    await ensureContactExists({
+      tenantId,
+      channel: "instagram",
+      identifier: event.from_id,
+    });
+
+    const { data: contactData } = await supabase
+      .from("contacts")
+      .select("id, tags")
+      .eq("tenant_id", tenantId)
+      .eq("channel", "instagram")
+      .eq("identifier", event.from_id)
+      .maybeSingle();
+
+    const workflowOutcome = await evaluateWorkflows({
+      tenantId,
+      triggerType: "comment_received",
+      channel: "instagram",
+      message: event.message,
+      intentDetected: classification.intent,
+      contactId: contactData?.id || null,
+      senderId: event.from_id,
+      contactTags: (contactData?.tags || []) as string[],
+      triggerEventId: convEventId,
+      metadata: {
+        source: "ig_comment",
+        comment_id: event.comment_id,
+        media_id: event.media_id,
+      },
+    });
+
+    for (const workflowMessage of workflowOutcome.outboundMessages) {
+      await sendDmToUser(event.from_id, workflowMessage, accessToken);
+      await recordOutboundThreadMessage({
+        tenantId,
+        channel: "instagram",
+        userIdentifier: event.from_id,
+        content: workflowMessage,
+        authorType: "bot",
+        resetUnread: true,
+        rawPayload: {
+          source: "workflow_comment",
+          workflow_matches: workflowOutcome.matchedWorkflows,
+          comment_id: event.comment_id,
+        },
+      });
+      botReply = workflowMessage;
+    }
+
+    if (workflowOutcome.stopProcessing) {
+      workflowHandled = true;
+      decision = "ignore";
+    }
+  }
+
+  if (!workflowHandled && decision === "public_reply") {
     // Respuesta pública breve al comentario
     const replyText = buildPublicReply(classification.intent);
     await sendCommentReply(event.comment_id, replyText, accessToken);
     botReply = replyText;
     console.info("[IGComments] Reply público enviado para", event.comment_id);
 
-  } else if (decision === "dm_followup") {
+  } else if (!workflowHandled && decision === "dm_followup") {
     // Abrir DM para continuar la conversación
     await ensureContactExists({
       tenantId,
@@ -257,7 +317,7 @@ export async function processInstagramComment(params: {
 
     console.info("[IGComments] DM enviado a", event.from_id);
 
-  } else if (decision === "human_handoff") {
+  } else if (!workflowHandled && decision === "human_handoff") {
     // Crear thread abierto para agente humano
     await ensureContactExists({
       tenantId,

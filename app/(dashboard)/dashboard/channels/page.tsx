@@ -12,7 +12,6 @@ import {
   PowerOff,
   MessageSquare,
   Check,
-  Circle,
   ExternalLink,
   Globe,
   ArrowRight,
@@ -24,10 +23,6 @@ import {
   ToggleLeft,
   ToggleRight,
 } from "lucide-react";
-import {
-  Card,
-  CardContent,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,6 +44,7 @@ import {
 } from "@/components/ui/sheet";
 import { toast } from "sonner";
 import { useDashboard } from "@/components/dashboard/dashboard-context";
+import { DashboardModuleHeader } from "@/components/dashboard/module-header";
 import {
   getChannels,
   createChannel,
@@ -368,36 +364,28 @@ export default function ChannelsPage() {
 
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-sm">
-              <Share2 className="w-4 h-4 text-white" />
-            </div>
-            Canales
-          </h1>
-          <p className="text-muted-foreground mt-1.5 text-sm">
-            Conecta plataformas para que tu bot atienda en múltiples canales
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {/* Plan badge */}
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/60 border border-border/50 text-xs text-muted-foreground">
-            <span className="font-medium capitalize text-foreground">{plan}</span>
-            <span>·</span>
-            <span>{externalChannels.length}/{limits.external === 99 ? "∞" : limits.external} externos</span>
+      <DashboardModuleHeader
+        domain="channels"
+        icon={Share2}
+        title="Canales"
+        description="Conecta y opera WhatsApp, Messenger, Instagram y Web con una configuracion visual consistente."
+        meta={(
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="text-[11px] capitalize">
+              Plan {plan}
+            </Badge>
+            <Badge variant="secondary" className="text-[11px]">
+              {externalChannels.length}/{limits.external === 99 ? "ilimitado" : limits.external} externos
+            </Badge>
           </div>
-
-          {canOpenAddDialog && (
-            <Button onClick={() => setShowAdd(true)} className="gap-2 shadow-sm">
-              <Plus className="w-4 h-4" />
-              Agregar canal
-            </Button>
-          )}
-        </div>
-      </div>
+        )}
+        actions={canOpenAddDialog ? (
+          <Button onClick={() => setShowAdd(true)} className="gap-2 shadow-sm">
+            <Plus className="w-4 h-4" />
+            Agregar canal
+          </Button>
+        ) : null}
+      />
 
       {/* Channel grid */}
       {channels.length === 0 ? (
@@ -1142,3 +1130,4 @@ function AddChannelDialog({
     </Dialog>
   );
 }
+

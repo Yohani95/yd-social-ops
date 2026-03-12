@@ -35,7 +35,7 @@ export async function ensureContactExists(params: {
     if (existing) {
       await supabase
         .from("contacts")
-        .update({ last_seen_at: now })
+        .update({ last_seen_at: now, last_interaction_at: now })
         .eq("id", existing.id)
         .eq("tenant_id", tenantId);
     } else {
@@ -63,6 +63,7 @@ export async function ensureContactExists(params: {
         notes: null,
         metadata: {},
         last_seen_at: now,
+        last_interaction_at: now,
         ...(canonicalContactId && { canonical_contact_id: canonicalContactId }),
       });
     }

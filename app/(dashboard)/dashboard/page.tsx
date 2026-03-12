@@ -1,15 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
+  ArrowRight,
   MessageSquare,
   ShoppingCart,
   TrendingUp,
-  Package,
-  Bot,
   Loader2,
   Users,
-  Activity,
   BarChart3,
   AlertCircle,
   Zap,
@@ -123,7 +122,7 @@ export default function DashboardPage() {
       title: "Mensajes esta semana",
       value: stats.messagesLast7Days,
       icon: MessageSquare,
-      description: `${stats.totalMessages.toLocaleString()} históricos · ${trend7d >= 0 ? "+" : ""}${trend7d}% vs sem. anterior`,
+      description: `${stats.totalMessages.toLocaleString()} historicos - ${trend7d >= 0 ? "+" : ""}${trend7d}% vs sem. anterior`,
       highlight: false,
     },
     {
@@ -139,7 +138,7 @@ export default function DashboardPage() {
       title: "Links de pago",
       value: stats.paymentLinksGenerated,
       icon: TrendingUp,
-      description: "Generados automáticamente",
+      description: "Generados automaticamente",
       highlight: false,
     },
     {
@@ -160,7 +159,7 @@ export default function DashboardPage() {
       title: "Threads sin responder",
       value: stats.unansweredThreads,
       icon: AlertCircle,
-      description: "Abiertos hace más de 2h",
+      description: "Abiertos hace mas de 2h",
       highlight: stats.unansweredThreads > 0,
     },
   ];
@@ -178,30 +177,91 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="min-w-0">
         <h1 className="text-xl sm:text-2xl font-bold truncate">
-          Hola, {tenant?.name || "Vendedor"} 👋
+          Hola, {tenant?.name || "Vendedor"}
         </h1>
         <p className="text-muted-foreground mt-1">
-          Aquí está el resumen de tu bot de ventas
+          Aqui esta el resumen operativo de tu negocio
         </p>
       </div>
-
-      <Card className="border-primary/20 bg-primary/5">
+      <Card>
         <CardHeader className="pb-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <Bot className="w-5 h-5 text-primary shrink-0" />
-              <CardTitle className="text-base truncate">URL de tu Bot</CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-base">Acciones rapidas</CardTitle>
+              <CardDescription>Prioriza operacion y configuracion diaria del negocio.</CardDescription>
             </div>
-            <Badge variant="success" className="self-start sm:ml-auto shrink-0">
-              {tenant?.plan_tier?.toUpperCase() || "BASIC"}
-            </Badge>
+            <Badge variant="success">{tenant?.plan_tier?.toUpperCase() || "BASIC"}</Badge>
           </div>
-          <CardDescription>
-            Integra esta URL en WhatsApp, Instagram o cualquier canal
-          </CardDescription>
         </CardHeader>
-        <CardContent>
-          <CopyBotUrlButton tenantId={tenantId} />
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-3">
+            <Link
+              href="/dashboard/channels"
+              className="rounded-xl border p-4 transition hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">Configurar canales</p>
+                  <p className="mt-1 text-sm text-muted-foreground">WhatsApp, Instagram, Messenger y Web.</p>
+                </div>
+                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              </div>
+            </Link>
+            <Link
+              href="/dashboard/inbox"
+              className="rounded-xl border p-4 transition hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">Ver inbox</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Responde conversaciones y revisa threads abiertos.</p>
+                </div>
+                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              </div>
+            </Link>
+            <Link
+              href="/dashboard/workflows"
+              className="rounded-xl border p-4 transition hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">Revisar workflows</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Activa automatizaciones, pruebas y seguimiento comercial.</p>
+                </div>
+                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              </div>
+            </Link>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Link
+              href="/dashboard/guide"
+              className="rounded-xl border p-4 transition hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">Guia de accion (30 min)</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Ruta rapida para lanzar campana, revisar inbox y medir resultados.</p>
+                </div>
+                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              </div>
+            </Link>
+            <Link
+              href="/dashboard/analytics"
+              className="rounded-xl border p-4 transition hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">Revision de resultados</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Conversiones, calidad del bot y rendimiento por canal en un solo panel.</p>
+                </div>
+                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              </div>
+            </Link>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed bg-muted/20 px-3 py-2">
+            <p className="text-xs text-muted-foreground">Tip: si tu objetivo es operar hoy, empieza por Guia 30 min y luego revisa Campanas.</p>
+            <CopyBotUrlButton tenantId={tenantId} />
+          </div>
         </CardContent>
       </Card>
 
@@ -232,12 +292,12 @@ export default function DashboardPage() {
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        {/* Area Chart — Messages per Day (30 days) */}
+        {/* Area Chart - Messages per Day (30 days) */}
         <Card className="xl:col-span-2">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <BarChart3 className="w-4 h-4" />
-              Mensajes últimos 30 días
+              Mensajes ultimos 30 dias
             </CardTitle>
             <CardDescription>
               Actividad diaria del bot con intenciones de compra
@@ -300,17 +360,17 @@ export default function DashboardPage() {
               </ResponsiveContainer>
             ) : (
               <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
-                Sin datos todavía
+                Sin datos todavia
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Pie Chart — Intent Breakdown */}
+        {/* Pie Chart - Intent Breakdown */}
         <Card>
           <CardHeader>
             <CardTitle>Intenciones detectadas</CardTitle>
-            <CardDescription>Distribución por tipo</CardDescription>
+            <CardDescription>Distribucion por tipo</CardDescription>
           </CardHeader>
           <CardContent>
             {stats.intentBreakdown.length > 0 ? (
@@ -342,9 +402,9 @@ export default function DashboardPage() {
                         borderRadius: 8,
                         fontSize: 13,
                       }}
-                      formatter={(value: any, name: any) => [
-                        value,
-                        INTENT_LABELS[name] || name,
+                      formatter={(value: number | string | undefined, name: string | undefined) => [
+                        value ?? 0,
+                        (name ? INTENT_LABELS[name] || name : "Intento"),
                       ]}
                     />
                   </PieChart>
@@ -369,7 +429,7 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
-                Sin datos todavía
+                Sin datos todavia
               </div>
             )}
           </CardContent>
@@ -380,9 +440,9 @@ export default function DashboardPage() {
       {stats.conversionFunnel.some((s) => s.value > 0) && (
         <Card>
           <CardHeader>
-            <CardTitle>Embudo de conversión</CardTitle>
+            <CardTitle>Embudo de conversion</CardTitle>
             <CardDescription>
-              Desde primer mensaje hasta generación de link de pago
+              Desde primer mensaje hasta generacion de link de pago
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -430,7 +490,7 @@ export default function DashboardPage() {
             {stats.totalMessages > 0 && (
               <div className="flex items-center gap-6 mt-3 text-xs text-muted-foreground justify-center">
                 <span>
-                  Tasa de interés:{" "}
+                  Tasa de interes:{" "}
                   <strong className="text-foreground">
                     {Math.round(
                       (stats.purchaseIntents / stats.totalMessages) * 100
@@ -439,7 +499,7 @@ export default function DashboardPage() {
                   </strong>
                 </span>
                 <span>
-                  Tasa de conversión:{" "}
+                  Tasa de conversion:{" "}
                   <strong className="text-foreground">
                     {stats.purchaseIntents > 0
                       ? Math.round(
@@ -462,7 +522,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>Mensajes por canal</CardTitle>
-            <CardDescription>Distribución de conversaciones</CardDescription>
+            <CardDescription>Distribucion de conversaciones</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
@@ -485,7 +545,7 @@ export default function DashboardPage() {
                         {channelLabels[ch.channel] || ch.channel}
                       </span>
                       <span className="text-muted-foreground">
-                        {ch.count} msgs · {ch.intents} intenciones · {ch.payments}{" "}
+                        {ch.count} msgs - {ch.intents} intenciones - {ch.payments}{" "}
                         pagos
                       </span>
                     </div>
@@ -507,13 +567,13 @@ export default function DashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>Conversaciones recientes</CardTitle>
-          <CardDescription>Últimas interacciones del bot</CardDescription>
+          <CardDescription>Ultimas interacciones del bot</CardDescription>
         </CardHeader>
         <CardContent>
           {stats.recentLogs.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-40" />
-              <p className="text-sm">No hay conversaciones aún</p>
+              <p className="text-sm">No hay conversaciones aun</p>
               <p className="text-xs mt-1">
                 Integra el bot para empezar a recibir mensajes
               </p>

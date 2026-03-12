@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Inbox, Package, Share2 } from "lucide-react";
+import { LayoutDashboard, Inbox, Megaphone, BarChart2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const bottomNavItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Inbox", href: "/dashboard/inbox", icon: Inbox },
-  { label: "Productos", href: "/dashboard/products", icon: Package },
-  { label: "Canales", href: "/dashboard/channels", icon: Share2 },
+  { label: "Bandeja", href: "/dashboard/inbox", icon: Inbox },
+  { label: "Campanas", href: "/dashboard/campaigns", icon: Megaphone },
+  { label: "Metricas", href: "/dashboard/quality", icon: BarChart2 },
 ];
 
 export function BottomNav() {

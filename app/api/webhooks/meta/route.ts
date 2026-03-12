@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { createServiceClient } from "@/lib/supabase/server";
 import { processMessage } from "@/lib/ai-service";
 import { checkAIRateLimit } from "@/lib/rate-limit";
@@ -7,6 +8,10 @@ import { notifyOwnerOnFirstExternalMessage } from "@/lib/owner-alerts";
 import { ensureContactExists } from "@/lib/contacts";
 import { processInstagramComment } from "@/lib/instagram-comments";
 import { isFeatureEnabled } from "@/lib/feature-flags";
+import { evaluateWorkflows } from "@/lib/workflow-engine";
+import { trackEvent } from "@/lib/conversion-analytics";
+import { applyRoutingDecision, resolveRouting } from "@/lib/routing";
+import { enqueueEvent } from "@/lib/event-queue";
 import {
   getMetaMediaUrl,
   transcribeAudioFromUrl,
@@ -49,7 +54,26 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const rawBody = await request.text();
+
+    // Validate HMAC-SHA256 signature from Meta
+    const appSecret = process.env.META_APP_SECRET;
+    if (appSecret) {
+      const signature = request.headers.get("x-hub-signature-256");
+      if (!signature) {
+        console.warn("[Meta Webhook] Missing x-hub-signature-256 — rejecting");
+        return NextResponse.json({ error: "Missing signature" }, { status: 403 });
+      }
+      const expected = `sha256=${crypto.createHmac("sha256", appSecret).update(rawBody).digest("hex")}`;
+      const sigBuf = Buffer.from(signature.padEnd(expected.length, " "));
+      const expBuf = Buffer.from(expected.padEnd(signature.length, " "));
+      if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+        console.warn("[Meta Webhook] Invalid HMAC signature — rejecting");
+        return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
+      }
+    }
+
+    const body = JSON.parse(rawBody);
     const objectType = body?.object;
 
     // Debug log para ver exactamente qué envía Meta
@@ -314,6 +338,25 @@ async function processAndReply(
 
   if (!message && !parsed.audioMediaId && !parsed.audioUrl) return;
 
+  // Guard anti-echo: evita procesar mensajes emitidos por la propia cuenta de Meta.
+  const providerConfig = (channel.provider_config || {}) as Record<string, unknown>;
+  const ownIds = new Set(
+    [
+      typeof parsed.metadata?.page_id === "string" ? parsed.metadata.page_id : null,
+      typeof parsed.metadata?.ig_account_id === "string" ? parsed.metadata.ig_account_id : null,
+      typeof providerConfig.page_id === "string" ? providerConfig.page_id : null,
+      typeof providerConfig.ig_account_id === "string" ? providerConfig.ig_account_id : null,
+      typeof channel.channel_identifier === "string" ? channel.channel_identifier : null,
+    ].filter((v): v is string => !!v && v.trim().length > 0)
+  );
+  if (ownIds.has(senderId)) {
+    console.info("[Meta Webhook] Mensaje echo ignorado", {
+      channel: channelType,
+      senderId,
+    });
+    return;
+  }
+
   await ensureContactExists({
     tenantId: channel.tenant_id,
     channel: channelType,
@@ -343,6 +386,113 @@ async function processAndReply(
   });
 
   const adapter = getAdapter(channelType);
+  const supabase = createServiceClient();
+  const { data: threadContext } = await supabase
+    .from("conversation_threads")
+    .select("id, contact_id")
+    .eq("tenant_id", channel.tenant_id)
+    .eq("channel", channelType)
+    .eq("user_identifier", senderId)
+    .maybeSingle();
+
+  let contactTags: string[] = [];
+  if (threadContext?.contact_id) {
+    const { data: contactData } = await supabase
+      .from("contacts")
+      .select("tags")
+      .eq("tenant_id", channel.tenant_id)
+      .eq("id", threadContext.contact_id)
+      .maybeSingle();
+    contactTags = (contactData?.tags || []) as string[];
+  }
+
+  await trackEvent({
+    tenantId: channel.tenant_id,
+    eventType: "conversation_started",
+    channel: channelType,
+    contactId: threadContext?.contact_id || null,
+    threadId: threadContext?.id || null,
+    actorType: "system",
+    metadata: { source: "meta_webhook" },
+  });
+
+  const eventQueueEnabled = await isFeatureEnabled(channel.tenant_id, "event_queue_enabled");
+  if (eventQueueEnabled) {
+    await enqueueEvent({
+      tenantId: channel.tenant_id,
+      type: "message_received",
+      payload: {
+        trigger_type: "message_received",
+        channel: channelType,
+        user_message: message || "",
+        user_identifier: senderId,
+        session_id: `${channelType}_${senderId}`,
+        contact_id: threadContext?.contact_id || null,
+        thread_id: threadContext?.id || null,
+        contact_tags: contactTags,
+        allow_ai_fallback: true,
+        metadata: { source: "meta_webhook" },
+      },
+    });
+  }
+
+  const routingEnabled = await isFeatureEnabled(channel.tenant_id, "routing_enabled");
+  if (routingEnabled && threadContext?.id) {
+    const routingDecision = await resolveRouting({
+      tenantId: channel.tenant_id,
+      threadId: threadContext.id,
+      contactId: threadContext.contact_id || null,
+      channel: channelType,
+      contactTags,
+    });
+    if (routingDecision.matched) {
+      await applyRoutingDecision({
+        tenantId: channel.tenant_id,
+        threadId: threadContext.id,
+        contactId: threadContext.contact_id || null,
+        decision: routingDecision,
+      });
+    }
+  }
+
+  const workflowEnabled = await isFeatureEnabled(channel.tenant_id, "workflow_engine_enabled");
+  if (workflowEnabled) {
+    const workflowOutcome = await evaluateWorkflows({
+      tenantId: channel.tenant_id,
+      triggerType: "message_received",
+      channel: channelType,
+      message: message || "",
+      contactId: threadContext?.contact_id || null,
+      threadId: threadContext?.id || null,
+      senderId,
+      contactTags,
+      metadata: {
+        source: "meta_webhook",
+        provider: "meta",
+      },
+    });
+
+    for (const workflowMessage of workflowOutcome.outboundMessages) {
+      const formatted = adapter.formatMessage(workflowMessage);
+      await adapter.sendReply(senderId, formatted, channel);
+      await recordOutboundThreadMessage({
+        tenantId: channel.tenant_id,
+        channel: channelType,
+        userIdentifier: senderId,
+        content: formatted,
+        authorType: "bot",
+        resetUnread: true,
+        rawPayload: {
+          source: "workflow",
+          workflow_matches: workflowOutcome.matchedWorkflows,
+        },
+      });
+    }
+
+    if (workflowOutcome.stopProcessing) {
+      return;
+    }
+  }
 
   const rateLimit = checkAIRateLimit(channel.tenant_id);
   if (!rateLimit.allowed) {

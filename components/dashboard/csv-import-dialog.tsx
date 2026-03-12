@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/table";
 import { toast } from "sonner";
 import { bulkCreateProducts } from "@/actions/products";
-import type { ProductCreate } from "@/types";
+import type { AvailabilityType, ItemType, PricingMode, ProductCreate } from "@/types";
 
 interface CsvImportDialogProps {
   open: boolean;
@@ -36,6 +36,9 @@ interface ParsedRow {
   stock: number;
   description: string;
   keywords: string[];
+  item_type: ItemType;
+  pricing_mode: PricingMode;
+  availability_type: AvailabilityType;
   valid: boolean;
   error?: string;
 }
@@ -54,7 +57,42 @@ const COLUMN_MAP: Record<string, keyof ParsedRow> = {
   "palabras clave": "keywords",
   etiquetas: "keywords",
   tags: "keywords",
+  tipo: "item_type",
+  "item type": "item_type",
+  pricing_mode: "pricing_mode",
+  "modo precio": "pricing_mode",
+  disponibilidad: "availability_type",
+  availability: "availability_type",
 };
+
+function parseItemType(value: string): ItemType {
+  const normalized = normalize(value);
+  if (normalized === "service" || normalized === "servicio") return "service";
+  if (normalized === "info" || normalized === "informacion") return "info";
+  if (normalized === "delivery" || normalized === "despacho" || normalized === "domicilio") return "delivery";
+  return "product";
+}
+
+function parsePricingMode(value: string, itemType: ItemType): PricingMode {
+  const normalized = normalize(value);
+  if (normalized === "fixed" || normalized === "fijo") return "fixed";
+  if (normalized === "from" || normalized === "desde") return "from";
+  if (normalized === "quote" || normalized === "cotizar") return "quote";
+  if (normalized === "free" || normalized === "gratis") return "free";
+  if (itemType === "info") return "free";
+  if (itemType === "service") return "from";
+  return "fixed";
+}
+
+function parseAvailability(value: string, itemType: ItemType): AvailabilityType {
+  const normalized = normalize(value);
+  if (normalized === "calendar" || normalized === "agenda") return "calendar";
+  if (normalized === "quota" || normalized === "cupo") return "quota";
+  if (normalized === "stock") return "stock";
+  if (itemType === "service") return "calendar";
+  if (itemType === "delivery") return "quota";
+  return "stock";
+}
 
 function normalize(col: string): string {
   return col
@@ -87,6 +125,9 @@ function parseRows(rawData: Record<string, string>[]): ParsedRow[] {
     const description = (row[mapping.description] || "").trim();
     const keywordsRaw = (row[mapping.keywords] || "").trim();
     const keywords = keywordsRaw ? keywordsRaw.split(/[,;|]/).map((k) => k.trim()).filter(Boolean) : [];
+    const itemType = parseItemType(row[mapping.item_type] || "");
+    const pricingMode = parsePricingMode(row[mapping.pricing_mode] || "", itemType);
+    const availabilityType = parseAvailability(row[mapping.availability_type] || "", itemType);
 
     const valid = !!name;
     return {
@@ -95,6 +136,9 @@ function parseRows(rawData: Record<string, string>[]): ParsedRow[] {
       stock,
       description,
       keywords,
+      item_type: itemType,
+      pricing_mode: pricingMode,
+      availability_type: availabilityType,
       valid,
       error: !name ? "Sin nombre" : undefined,
     };
@@ -146,18 +190,20 @@ export function CsvImportDialog({ open, onOpenChange, onImported }: CsvImportDia
     const products: ProductCreate[] = validRows.map((r) => ({
       name: r.name,
       description: r.description || null,
-      price: r.price,
-      stock: r.stock,
+      price: r.item_type === "info" || r.pricing_mode === "free" ? 0 : r.price,
+      stock: r.item_type === "info" ? 0 : r.stock,
       keywords: r.keywords.length ? r.keywords : null,
       image_url: null,
-      item_type: "product" as const,
+      item_type: r.item_type,
+      pricing_mode: r.pricing_mode,
+      availability_type: r.availability_type,
     }));
 
     const result = await bulkCreateProducts(products);
     setImporting(false);
 
     if (result.success) {
-      toast.success(`${result.data?.created} productos importados`);
+      toast.success(`${result.data?.created} items importados`);
       if (result.data?.errors.length) {
         toast.warning(`${result.data.errors.length} filas con errores`);
       }
@@ -182,10 +228,11 @@ export function CsvImportDialog({ open, onOpenChange, onImported }: CsvImportDia
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileSpreadsheet className="w-5 h-5" />
-            Importar productos desde CSV
+            Importar items desde CSV
           </DialogTitle>
           <DialogDescription>
-            Sube un archivo CSV con columnas: nombre, precio, stock, descripcion, keywords
+            Sube un CSV con columnas base: nombre, precio, stock, descripcion, keywords.
+            Opcionales: tipo, pricing_mode, disponibilidad.
           </DialogDescription>
         </DialogHeader>
 
@@ -200,10 +247,10 @@ export function CsvImportDialog({ open, onOpenChange, onImported }: CsvImportDia
             onClick={() => fileRef.current?.click()}
           >
             <Upload className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
-            <p className="font-medium">Arrastra tu archivo CSV aquí</p>
+            <p className="font-medium">Arrastra tu archivo CSV aqui</p>
             <p className="text-sm text-muted-foreground mt-1">o haz clic para seleccionar</p>
             <p className="text-xs text-muted-foreground mt-3">
-              Formato: nombre, precio, stock, descripcion, keywords
+              Formato recomendado: nombre, tipo, precio, stock, descripcion, keywords
             </p>
             <input
               ref={fileRef}
@@ -221,7 +268,7 @@ export function CsvImportDialog({ open, onOpenChange, onImported }: CsvImportDia
                 <span className="text-sm font-medium">{fileName}</span>
                 <Badge variant="secondary">{rows.length} filas</Badge>
                 {validRows.length > 0 && (
-                  <Badge variant="success">{validRows.length} válidos</Badge>
+                  <Badge variant="success">{validRows.length} validos</Badge>
                 )}
                 {invalidRows.length > 0 && (
                   <Badge variant="destructive">{invalidRows.length} errores</Badge>
@@ -240,6 +287,7 @@ export function CsvImportDialog({ open, onOpenChange, onImported }: CsvImportDia
                     <TableRow>
                       <TableHead className="w-8">#</TableHead>
                       <TableHead>Nombre</TableHead>
+                      <TableHead>Tipo</TableHead>
                       <TableHead className="text-right">Precio</TableHead>
                       <TableHead className="text-right">Stock</TableHead>
                       <TableHead>Keywords</TableHead>
@@ -250,11 +298,12 @@ export function CsvImportDialog({ open, onOpenChange, onImported }: CsvImportDia
                     {rows.slice(0, 50).map((row, i) => (
                       <TableRow key={i} className={!row.valid ? "bg-destructive/5" : ""}>
                         <TableCell className="text-xs text-muted-foreground">{i + 1}</TableCell>
-                        <TableCell className="font-medium text-sm">{row.name || "—"}</TableCell>
+                        <TableCell className="font-medium text-sm">{row.name || "-"}</TableCell>
+                        <TableCell className="text-sm">{row.item_type}</TableCell>
                         <TableCell className="text-right text-sm">{row.price.toLocaleString("es-CL")}</TableCell>
                         <TableCell className="text-right text-sm">{row.stock}</TableCell>
                         <TableCell className="text-xs text-muted-foreground truncate max-w-[120px]">
-                          {row.keywords.join(", ") || "—"}
+                          {row.keywords.join(", ") || "-"}
                         </TableCell>
                         <TableCell>
                           {row.valid ? (
@@ -288,7 +337,7 @@ export function CsvImportDialog({ open, onOpenChange, onImported }: CsvImportDia
                 ) : (
                   <Upload className="w-4 h-4 mr-1" />
                 )}
-                Importar {validRows.length} productos
+                Importar {validRows.length} items
               </Button>
             </div>
           </div>
@@ -297,3 +346,4 @@ export function CsvImportDialog({ open, onOpenChange, onImported }: CsvImportDia
     </Dialog>
   );
 }
+

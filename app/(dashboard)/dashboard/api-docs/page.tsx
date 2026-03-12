@@ -8,9 +8,7 @@ import {
   KeyRound,
   Plus,
   Loader2,
-  ExternalLink,
   Terminal,
-  RefreshCw,
   Eye,
   EyeOff,
 } from "lucide-react";
@@ -18,7 +16,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { DashboardModuleHeader } from "@/components/dashboard/module-header";
 import { toast } from "sonner";
 import { listApiKeys, createApiKey, type ApiKey } from "@/actions/api-keys";
 
@@ -183,7 +181,6 @@ export default function ApiDocsPage() {
   const [expandedResponse, setExpandedResponse] = useState<string | null>(null);
 
   const activeKey = keys.find((k) => k.is_active);
-  const displayKey = activeKey ? `yd_${activeKey.key_prefix}...` : "TU_API_KEY";
 
   useEffect(() => {
     listApiKeys().then((r) => {
@@ -195,7 +192,7 @@ export default function ApiDocsPage() {
   function handleCreate() {
     if (!newLabel.trim()) return;
     startCreate(async () => {
-      const r = await createApiKey({ label: newLabel.trim(), scopes: ["*"] });
+      const r = await createApiKey({ label: newLabel.trim(), scopes: ["all"] });
       if (r.success && r.data) {
         toast.success("API Key creada — cópiala ahora, no se volverá a mostrar completa");
         setRevealedKey(r.data.secret_key);
@@ -212,18 +209,22 @@ export default function ApiDocsPage() {
 
   return (
     <div className="space-y-8 max-w-4xl">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center shadow-sm">
-            <Code2 className="w-4 h-4 text-white" />
+      <DashboardModuleHeader
+        domain="integrations"
+        icon={Code2}
+        title="API Docs"
+        description="Documentacion tecnica para integrar YD Social Ops con API Key, endpoints y ejemplos listos para copiar."
+        meta={(
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="text-[11px]">
+              API publica REST
+            </Badge>
+            <Badge variant="secondary" className="text-[11px]">
+              {endpoints.length} endpoints de referencia
+            </Badge>
           </div>
-          Documentación API
-        </h1>
-        <p className="text-muted-foreground mt-1.5 text-sm">
-          Integra YD Social Ops con tu stack usando la API pública autenticada con API Key.
-        </p>
-      </div>
+        )}
+      />
 
       {/* Auth section */}
       <Card>
@@ -400,3 +401,4 @@ export default function ApiDocsPage() {
     </div>
   );
 }
+

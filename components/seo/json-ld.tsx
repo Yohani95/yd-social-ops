@@ -54,12 +54,6 @@ export default function JsonLd() {
             "Gestión de inventario automática",
         ],
         inLanguage: "es",
-        aggregateRating: {
-            "@type": "AggregateRating",
-            ratingValue: "4.8",
-            ratingCount: "150",
-            bestRating: "5",
-        },
     };
 
     return (

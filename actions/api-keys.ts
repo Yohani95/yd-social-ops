@@ -85,7 +85,20 @@ export async function createApiKey(params: {
             key_hash: keyHash,
             key_prefix: `ydso_live_${prefix}`,
             label,
-            scopes: params.scopes && params.scopes.length > 0 ? params.scopes : ["contacts:read", "messages:write"],
+            scopes: params.scopes && params.scopes.length > 0
+                ? params.scopes
+                : [
+                    "contacts:read",
+                    "messages:write",
+                    "workflows:read",
+                    "workflows:write",
+                    "campaigns:read",
+                    "campaigns:write",
+                    "routing:read",
+                    "routing:write",
+                    "analytics:read",
+                    "integrations:write",
+                ],
         })
         .select("id, key_prefix, label, scopes, is_active, last_used_at, created_at")
         .single();

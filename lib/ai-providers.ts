@@ -134,10 +134,52 @@ const GROQ_FALLBACK_MODELS = [
   "allam-2-7b",           // 7K RPD
 ] as const;
 
-function getGroqModelsToTry(): string[] {
+const GROQ_MODELS_WITHOUT_TOOL_CALLING = new Set<string>([
+  "llama-3.1-8b-instant",
+  "allam-2-7b",
+]);
+
+const groqModelCooldownUntil = new Map<string, number>();
+
+function getGroqMaxTokens(): number {
+  const raw = Number.parseInt(
+    process.env.GROQ_MAX_OUTPUT_TOKENS || process.env.AI_MAX_OUTPUT_TOKENS || "500",
+    10
+  );
+  if (!Number.isFinite(raw)) return 500;
+  return Math.min(Math.max(raw, 128), 1200);
+}
+
+function getGroqModelCooldownMs(): number {
+  const raw = Number.parseInt(process.env.GROQ_MODEL_COOLDOWN_MS || "90000", 10);
+  if (!Number.isFinite(raw)) return 90_000;
+  return Math.min(Math.max(raw, 5_000), 600_000);
+}
+
+function isGroqModelCoolingDown(model: string): boolean {
+  const until = groqModelCooldownUntil.get(model);
+  return typeof until === "number" && until > Date.now();
+}
+
+function markGroqModelRateLimited(model: string): number {
+  const cooldownMs = getGroqModelCooldownMs();
+  groqModelCooldownUntil.set(model, Date.now() + cooldownMs);
+  return cooldownMs;
+}
+
+function getGroqModelsToTry(tools?: AITool[]): string[] {
   const primary = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
   const fallbacks = GROQ_FALLBACK_MODELS.filter((m) => m !== primary);
-  return [primary, ...fallbacks];
+  const ordered = [primary, ...fallbacks];
+  const compatible =
+    !tools || tools.length === 0
+      ? ordered
+      : // Evita probar modelos Groq conocidos por no soportar tool calling.
+        ordered.filter((model) => !GROQ_MODELS_WITHOUT_TOOL_CALLING.has(model));
+
+  const available = compatible.filter((model) => !isGroqModelCoolingDown(model));
+  if (available.length > 0) return available;
+  return compatible;
 }
 
 function isRateLimitError(err: unknown): boolean {
@@ -148,6 +190,11 @@ function isRateLimitError(err: unknown): boolean {
     msg.includes("RESOURCE_EXHAUSTED") ||
     msg.includes("quota")
   );
+}
+
+function isToolCallingUnsupportedError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return msg.includes("tool calling") && msg.includes("not supported");
 }
 
 async function callGroqWithModel(
@@ -166,7 +213,7 @@ async function callGroqWithModel(
     model,
     messages: groqMessages,
     temperature: 0.7,
-    max_tokens: 800,
+    max_tokens: getGroqMaxTokens(),
     ...(tools && tools.length > 0 && {
       tools: tools.map((t) => ({
         type: "function" as const,
@@ -202,7 +249,12 @@ async function callGroq(
   tools?: AITool[]
 ): Promise<AIResponse> {
   let lastError: unknown;
-  for (const model of getGroqModelsToTry()) {
+  const modelsToTry = getGroqModelsToTry(tools);
+  if (tools && tools.length > 0 && modelsToTry.length === 0) {
+    throw new Error("No hay modelos Groq compatibles con tool calling en la configuracion actual.");
+  }
+
+  for (const model of modelsToTry) {
     try {
       const result = await callGroqWithModel(messages, model, tools);
       if (result.modelUsed) {
@@ -212,7 +264,12 @@ async function callGroq(
     } catch (err) {
       lastError = err;
       if (isRateLimitError(err)) {
-        console.warn(`[AI] Groq modelo ${model} sin cuota, probando siguiente...`);
+        const cooldownMs = markGroqModelRateLimited(model);
+        console.warn(
+          `[AI] Groq modelo ${model} sin cuota, enfriando ${Math.round(cooldownMs / 1000)}s y probando siguiente...`
+        );
+      } else if (isToolCallingUnsupportedError(err)) {
+        console.warn(`[AI] Groq modelo ${model} no soporta tool calling, probando siguiente...`);
       } else {
         throw err;
       }
@@ -242,7 +299,7 @@ async function callGroqWithToolResult(
       { role: "tool" as const, tool_call_id: toolCallId, content: toolResult },
     ],
     temperature: 0.7,
-    max_tokens: 800,
+    max_tokens: getGroqMaxTokens(),
   });
 
   return {

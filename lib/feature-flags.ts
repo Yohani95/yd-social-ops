@@ -19,7 +19,16 @@ export type FeatureFlag =
   | "instagram_comments_enabled"
   | "repetition_guard_enabled"
   | "advanced_config_enabled"
-  | "quality_tracking_enabled";
+  | "quality_tracking_enabled"
+  | "workflow_engine_enabled"
+  | "lead_lifecycle_enabled"
+  | "campaigns_enabled"
+  | "routing_enabled"
+  | "conversion_analytics_enabled"
+  | "event_queue_enabled"
+  | "workflow_ui_enabled"
+  | "ecommerce_enabled"
+  | "scheduling_enabled";
 
 // Cache simple en memoria (30s TTL)
 const cache = new Map<string, { flags: Record<string, boolean>; expiresAt: number }>();

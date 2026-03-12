@@ -19,6 +19,13 @@ import {
   Mail,
   Phone,
   FileText,
+  Server,
+  Send,
+  ShoppingBag,
+  CalendarCheck,
+  Inbox,
+  Share2,
+  GitBranch,
 } from "lucide-react";
 import {
   Card,
@@ -85,6 +92,8 @@ interface SettingsClientProps {
   mpPreapprovalId?: string;
   gmailSuccess?: boolean;
   gmailError?: string;
+  calendlySuccess?: boolean;
+  calendlyError?: string;
   initialSaasPlan?: PlanTier;
   initialTab?: "general" | "integrations" | "payments" | "enterprise" | "bot";
   initialFlags?: Record<string, boolean>;
@@ -196,6 +205,8 @@ export function SettingsClient({
   mpPreapprovalId,
   gmailSuccess,
   gmailError,
+  calendlySuccess,
+  calendlyError,
   initialSaasPlan,
   initialTab,
   initialFlags,
@@ -283,7 +294,13 @@ export function SettingsClient({
     email: "",
     has_refresh_token: false,
   });
-  const [selectedConnector, setSelectedConnector] = useState<"gmail_oauth" | "smtp" | "resend" | "n8n" | null>(null);
+  const [selectedConnector, setSelectedConnector] = useState<"gmail_oauth" | "smtp" | "resend" | "n8n" | "ecommerce" | "calendly" | "email_inbound" | null>(null);
+  const [ecommerceStatus, setEcommerceStatus] = useState<{ platform?: string; shop_url?: string } | null>(null);
+  const [calendlyStatus, setCalendlyStatus] = useState<{ event_type_uri?: string } | null>(null);
+  const [ecommerceForm, setEcommerceForm] = useState({ platform: "woocommerce", shop_url: "", api_key: "", api_secret: "" });
+  const [calendlyForm, setCalendlyForm] = useState({ access_token: "", event_type_uri: "", timezone: "America/Santiago" });
+  const [emailInboundForm, setEmailInboundForm] = useState({ inbound_address: "" });
+  const [isIntegrationSaving, setIsIntegrationSaving] = useState(false);
 
   // Mostrar notificaciones de MP OAuth
   useEffect(() => {
@@ -303,7 +320,23 @@ export function SettingsClient({
       toast.error(gmailErrorMessages[gmailError] || `Error de Gmail: ${gmailError}`);
       router.replace("/dashboard/settings");
     }
-  }, [mpSuccess, mpError, gmailSuccess, gmailError, router]);
+    if (calendlySuccess) {
+      toast.success("¡Calendly conectado exitosamente!");
+      setCalendlyStatus({});
+      router.replace("/dashboard/settings?tab=integrations");
+    }
+    if (calendlyError) {
+      const errMsgs: Record<string, string> = {
+        missing_params:  "Parámetros faltantes en el callback de Calendly.",
+        invalid_state:   "Estado inválido o expirado. Intenta nuevamente.",
+        token_exchange:  "Error al intercambiar el código de autorización.",
+        network:         "Error de red al conectar con Calendly.",
+        db:              "Error al guardar la configuración.",
+      };
+      toast.error(errMsgs[calendlyError] || `Error Calendly: ${calendlyError}`);
+      router.replace("/dashboard/settings?tab=integrations");
+    }
+  }, [mpSuccess, mpError, gmailSuccess, gmailError, calendlySuccess, calendlyError, router]);
 
   const isOwner = userRole === "owner";
   const tenantView = billingTenant || tenant;
@@ -488,6 +521,63 @@ export function SettingsClient({
     void loadTenantIntegrations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenant?.id]);
+
+  useEffect(() => {
+    fetch("/api/integrations/ecommerce/connect")
+      .then((r) => r.json())
+      .then((r) => { if (r.success && r.data) setEcommerceStatus(r.data); })
+      .catch(() => {});
+    fetch("/api/integrations/calendly/connect")
+      .then((r) => r.json())
+      .then((r) => { if (r.success && r.data) setCalendlyStatus(r.data); })
+      .catch(() => {});
+  }, []);
+
+  async function handleSaveEcommerce() {
+    setIsIntegrationSaving(true);
+    try {
+      const res = await fetch("/api/integrations/ecommerce/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ecommerceForm),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`Tienda conectada. ${data.data?.products_synced ?? 0} productos sincronizados.`);
+        setEcommerceStatus({ platform: ecommerceForm.platform, shop_url: ecommerceForm.shop_url });
+        setSelectedConnector(null);
+      } else {
+        toast.error(data.error || "Error conectando la tienda");
+      }
+    } catch {
+      toast.error("Error de conexión");
+    } finally {
+      setIsIntegrationSaving(false);
+    }
+  }
+
+  async function handleSaveCalendly() {
+    setIsIntegrationSaving(true);
+    try {
+      const res = await fetch("/api/integrations/calendly/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(calendlyForm),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`Calendly conectado. ${data.data?.available_slots ?? 0} slots disponibles.`);
+        setCalendlyStatus({ event_type_uri: calendlyForm.event_type_uri });
+        setSelectedConnector(null);
+      } else {
+        toast.error(data.error || "Error conectando Calendly");
+      }
+    } catch {
+      toast.error("Error de conexión");
+    } finally {
+      setIsIntegrationSaving(false);
+    }
+  }
 
   function encodeBase64Url(value: string): string {
     if (typeof window === "undefined") return value;
@@ -1325,113 +1415,206 @@ export function SettingsClient({
                 Elige una integración y conecta en pocos pasos.
               </CardDescription>
             </CardHeader>
-            <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="rounded-md border p-3 space-y-3">
-                <div>
-                  <p className="text-sm font-medium">Meta (OAuth)</p>
-                  <p className="text-xs text-muted-foreground">WhatsApp, Messenger, Instagram</p>
+            <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {/* Meta */}
+              <div className="rounded-xl border bg-card hover:shadow-sm transition-shadow flex flex-col gap-4 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-blue-50 p-2 shrink-0">
+                    <Share2 className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <p className="text-sm font-semibold">Meta</p>
+                      <Badge variant="outline" className="text-xs">OAuth</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">WhatsApp · Messenger · Instagram</p>
+                  </div>
                 </div>
-                <Badge variant="outline">OAuth</Badge>
-                <Button className="w-full" variant="outline" onClick={() => router.push("/dashboard/channels")}>
-                  Conectar
+                <Button size="sm" variant="outline" className="w-full" onClick={() => router.push("/dashboard/channels")}>
+                  Administrar canales
                 </Button>
               </div>
 
-              <div className="rounded-md border p-3 space-y-3">
-                <div>
-                  <p className="text-sm font-medium">Mercado Pago (OAuth)</p>
-                  <p className="text-xs text-muted-foreground">
-                    Estado: {isMPConnected ? "Conectado" : "No conectado"}
-                  </p>
+              {/* MercadoPago */}
+              <div className="rounded-xl border bg-card hover:shadow-sm transition-shadow flex flex-col gap-4 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-teal-50 p-2 shrink-0">
+                    <CreditCard className="w-5 h-5 text-teal-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <p className="text-sm font-semibold">Mercado Pago</p>
+                      <Badge variant={isMPConnected ? "success" : "outline"} className="text-xs">
+                        {isMPConnected ? "Conectado" : "Pendiente"}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">Pagos y suscripciones vía OAuth</p>
+                  </div>
                 </div>
-                <Badge variant={isMPConnected ? "success" : "outline"}>
-                  {isMPConnected ? "Conectado" : "Pendiente"}
-                </Badge>
-                <Button className="w-full" onClick={handleConnectMP} disabled={!isOwner || isPending}>
+                <Button size="sm" className="w-full" onClick={handleConnectMP} disabled={!isOwner || isPending}>
                   {isMPConnected ? "Reconectar" : "Conectar"}
                 </Button>
               </div>
 
-              <div className="rounded-md border p-3 space-y-3">
-                <div>
-                  <p className="text-sm font-medium">Gmail (OAuth)</p>
-                  <p className="text-xs text-muted-foreground">
-                    {GMAIL_OAUTH_COMING_SOON
-                      ? "Integracion pausada temporalmente. Se habilitara proximamente."
-                      : gmailOAuthForm.email
-                      ? `Cuenta: ${gmailOAuthForm.email}`
-                      : "Conecta Gmail sin configurar puerto ni SMTP"}
-                  </p>
+              {/* Gmail */}
+              <div className="rounded-xl border bg-card hover:shadow-sm transition-shadow flex flex-col gap-4 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-red-50 p-2 shrink-0">
+                    <Mail className="w-5 h-5 text-red-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <p className="text-sm font-semibold">Gmail</p>
+                      <Badge variant={GMAIL_OAUTH_COMING_SOON ? "secondary" : gmailOAuthForm.is_active ? "success" : "outline"} className="text-xs">
+                        {GMAIL_OAUTH_COMING_SOON ? "Próximamente" : gmailOAuthForm.is_active ? "Conectado" : "No conectado"}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {gmailOAuthForm.email ? gmailOAuthForm.email : "Conecta sin configurar SMTP"}
+                    </p>
+                  </div>
                 </div>
-                <Badge variant={GMAIL_OAUTH_COMING_SOON ? "secondary" : gmailOAuthForm.is_active ? "success" : "outline"}>
-                  {GMAIL_OAUTH_COMING_SOON ? "Proximamente" : gmailOAuthForm.is_active ? "Conectado" : "No conectado"}
-                </Badge>
-                <Button
-                  className="w-full"
-                  onClick={handleConnectGmail}
-                  disabled={GMAIL_OAUTH_COMING_SOON || !isOwner || isPending}
-                >
-                  {GMAIL_OAUTH_COMING_SOON ? "Proximamente" : gmailOAuthForm.is_active ? "Reconectar" : "Conectar"}
-                </Button>
-                {!GMAIL_OAUTH_COMING_SOON && gmailOAuthForm.is_active && (
-                  <Button
-                    className="w-full"
-                    variant="outline"
-                    onClick={() => setSelectedConnector("gmail_oauth")}
-                  >
-                    Administrar
+                <div className="flex gap-2">
+                  <Button size="sm" className="flex-1" onClick={handleConnectGmail} disabled={GMAIL_OAUTH_COMING_SOON || !isOwner || isPending}>
+                    {GMAIL_OAUTH_COMING_SOON ? "Próximamente" : gmailOAuthForm.is_active ? "Reconectar" : "Conectar"}
                   </Button>
-                )}
+                  {!GMAIL_OAUTH_COMING_SOON && gmailOAuthForm.is_active && (
+                    <Button size="sm" variant="outline" onClick={() => setSelectedConnector("gmail_oauth")}>
+                      <Settings className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
+                </div>
               </div>
 
-              <div className="rounded-md border p-3 space-y-3">
-                <div>
-                  <p className="text-sm font-medium">Email SMTP</p>
-                  <p className="text-xs text-muted-foreground">Gmail, Outlook o servidor propio</p>
+              {/* SMTP */}
+              <div className="rounded-xl border bg-card hover:shadow-sm transition-shadow flex flex-col gap-4 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-gray-100 p-2 shrink-0">
+                    <Server className="w-5 h-5 text-gray-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <p className="text-sm font-semibold">Email SMTP</p>
+                      <Badge variant={smtpForm.is_active ? "success" : "outline"} className="text-xs">
+                        {smtpForm.is_active ? "Activo" : "Sin configurar"}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">Gmail, Outlook o servidor propio</p>
+                  </div>
                 </div>
-                <Badge variant={smtpForm.is_active ? "success" : "outline"}>
-                  {smtpForm.is_active ? "Activo" : "No configurado"}
-                </Badge>
-                <Button
-                  className="w-full"
-                  variant="outline"
-                  onClick={() => setSelectedConnector("smtp")}
-                >
+                <Button size="sm" variant="outline" className="w-full" onClick={() => setSelectedConnector("smtp")}>
                   {smtpForm.is_active ? "Editar" : "Configurar"}
                 </Button>
               </div>
 
-              <div className="rounded-md border p-3 space-y-3">
-                <div>
-                  <p className="text-sm font-medium">Resend</p>
-                  <p className="text-xs text-muted-foreground">Proveedor transaccional de email</p>
+              {/* Resend */}
+              <div className="rounded-xl border bg-card hover:shadow-sm transition-shadow flex flex-col gap-4 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-purple-50 p-2 shrink-0">
+                    <Send className="w-5 h-5 text-purple-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <p className="text-sm font-semibold">Resend</p>
+                      <Badge variant={resendForm.is_active ? "success" : "outline"} className="text-xs">
+                        {resendForm.is_active ? "Activo" : "Sin configurar"}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">Email transaccional de alta entrega</p>
+                  </div>
                 </div>
-                <Badge variant={resendForm.is_active ? "success" : "outline"}>
-                  {resendForm.is_active ? "Activo" : "No configurado"}
-                </Badge>
-                <Button
-                  className="w-full"
-                  variant="outline"
-                  onClick={() => setSelectedConnector("resend")}
-                >
+                <Button size="sm" variant="outline" className="w-full" onClick={() => setSelectedConnector("resend")}>
                   {resendForm.is_active ? "Editar" : "Configurar"}
                 </Button>
               </div>
 
-              <div className="rounded-md border p-3 space-y-3 sm:col-span-2">
-                <div>
-                  <p className="text-sm font-medium">n8n Webhook</p>
-                  <p className="text-xs text-muted-foreground">Automatizaciones externas por tenant</p>
+              {/* n8n */}
+              <div className="rounded-xl border bg-card hover:shadow-sm transition-shadow flex flex-col gap-4 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-orange-50 p-2 shrink-0">
+                    <GitBranch className="w-5 h-5 text-orange-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <p className="text-sm font-semibold">n8n Webhook</p>
+                      <Badge variant={n8nForm.is_active ? "success" : "outline"} className="text-xs">
+                        {n8nForm.is_active ? "Activo" : "Sin configurar"}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">Automatizaciones externas por tenant</p>
+                  </div>
                 </div>
-                <Badge variant={n8nForm.is_active ? "success" : "outline"}>
-                  {n8nForm.is_active ? "Activo" : "No configurado"}
-                </Badge>
-                <Button
-                  className="w-full sm:w-auto"
-                  variant="outline"
-                  onClick={() => setSelectedConnector("n8n")}
-                >
+                <Button size="sm" variant="outline" className="w-full" onClick={() => setSelectedConnector("n8n")}>
                   {n8nForm.is_active ? "Editar" : "Configurar"}
+                </Button>
+              </div>
+
+              {/* WooCommerce / Shopify */}
+              <div className="rounded-xl border bg-card hover:shadow-sm transition-shadow flex flex-col gap-4 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-indigo-50 p-2 shrink-0">
+                    <ShoppingBag className="w-5 h-5 text-indigo-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <p className="text-sm font-semibold">E-commerce</p>
+                      <Badge variant={ecommerceStatus ? "success" : "outline"} className="text-xs">
+                        {ecommerceStatus ? "Conectado" : "Sin configurar"}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {ecommerceStatus
+                        ? `${ecommerceStatus.platform ?? "Tienda"}: ${ecommerceStatus.shop_url ?? ""}`
+                        : "WooCommerce · Shopify — pedidos y stock"}
+                    </p>
+                  </div>
+                </div>
+                <Button size="sm" variant="outline" className="w-full" onClick={() => setSelectedConnector("ecommerce")}>
+                  {ecommerceStatus ? "Editar" : "Conectar tienda"}
+                </Button>
+              </div>
+
+              {/* Calendly */}
+              <div className="rounded-xl border bg-card hover:shadow-sm transition-shadow flex flex-col gap-4 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-green-50 p-2 shrink-0">
+                    <CalendarCheck className="w-5 h-5 text-green-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <p className="text-sm font-semibold">Calendly</p>
+                      <Badge variant={calendlyStatus ? "success" : "outline"} className="text-xs">
+                        {calendlyStatus ? "Conectado" : "Sin configurar"}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {calendlyStatus
+                        ? "Agendamiento activo — el bot consulta disponibilidad"
+                        : "El bot agenda citas y consulta disponibilidad"}
+                    </p>
+                  </div>
+                </div>
+                <Button size="sm" variant="outline" className="w-full" onClick={() => setSelectedConnector("calendly")}>
+                  {calendlyStatus ? "Editar" : "Conectar"}
+                </Button>
+              </div>
+
+              {/* Email Inbox */}
+              <div className="rounded-xl border bg-card hover:shadow-sm transition-shadow flex flex-col gap-4 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-cyan-50 p-2 shrink-0">
+                    <Inbox className="w-5 h-5 text-cyan-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <p className="text-sm font-semibold">Email Inbox</p>
+                      <Badge variant="secondary" className="text-xs">Resend Inbound</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">Recibe emails directo en el inbox omnicanal</p>
+                  </div>
+                </div>
+                <Button size="sm" variant="outline" className="w-full" onClick={() => setSelectedConnector("email_inbound")}>
+                  Ver instrucciones
                 </Button>
               </div>
             </CardContent>
@@ -1591,6 +1774,131 @@ export function SettingsClient({
                     <Button variant="ghost" onClick={() => setSelectedConnector(null)}>Cancelar</Button>
                   </div>
                 )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* WooCommerce / Shopify Dialog */}
+          <Dialog open={selectedConnector === "ecommerce"} onOpenChange={(o) => !o && setSelectedConnector(null)}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Conectar tienda ecommerce</DialogTitle>
+                <DialogDescription>Sincroniza productos y permite al bot consultar pedidos.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 pt-2">
+                <div className="space-y-1.5">
+                  <Label>Plataforma</Label>
+                  <select
+                    className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+                    value={ecommerceForm.platform}
+                    onChange={(e) => setEcommerceForm((p) => ({ ...p, platform: e.target.value }))}
+                    disabled={!isOwner}
+                  >
+                    <option value="woocommerce">WooCommerce</option>
+                    <option value="shopify">Shopify</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="eco_url">URL de la tienda</Label>
+                  <Input id="eco_url" value={ecommerceForm.shop_url}
+                    onChange={(e) => setEcommerceForm((p) => ({ ...p, shop_url: e.target.value }))}
+                    placeholder={ecommerceForm.platform === "shopify" ? "mi-tienda.myshopify.com" : "https://mi-tienda.com"}
+                    disabled={!isOwner} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="eco_key">{ecommerceForm.platform === "shopify" ? "Access Token" : "Consumer Key"}</Label>
+                  <Input id="eco_key" type="password" value={ecommerceForm.api_key}
+                    onChange={(e) => setEcommerceForm((p) => ({ ...p, api_key: e.target.value }))}
+                    placeholder={ecommerceForm.platform === "shopify" ? "shpat_..." : "ck_..."}
+                    disabled={!isOwner} />
+                </div>
+                {ecommerceForm.platform === "woocommerce" && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="eco_secret">Consumer Secret</Label>
+                    <Input id="eco_secret" type="password" value={ecommerceForm.api_secret}
+                      onChange={(e) => setEcommerceForm((p) => ({ ...p, api_secret: e.target.value }))}
+                      placeholder="cs_..."
+                      disabled={!isOwner} />
+                  </div>
+                )}
+                {isOwner && (
+                  <div className="flex gap-2 pt-1">
+                    <Button onClick={handleSaveEcommerce} disabled={isIntegrationSaving || !ecommerceForm.shop_url || !ecommerceForm.api_key}>
+                      {isIntegrationSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                      Conectar y sincronizar
+                    </Button>
+                    <Button variant="ghost" onClick={() => setSelectedConnector(null)}>Cancelar</Button>
+                  </div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Calendly OAuth Dialog */}
+          <Dialog open={selectedConnector === "calendly"} onOpenChange={(o) => !o && setSelectedConnector(null)}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Conectar Calendly</DialogTitle>
+                <DialogDescription>
+                  Autoriza a YD Social Ops para consultar disponibilidad y agendar citas en nombre de tu cuenta Calendly.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 pt-2">
+                {calendlyStatus ? (
+                  <div className="rounded-md border p-3 bg-muted/30 text-sm space-y-1">
+                    <p className="font-medium text-green-600 dark:text-green-400">✓ Calendly conectado</p>
+                    <p className="text-muted-foreground">Los bot tools de agendamiento están activos.</p>
+                    <p className="text-xs text-muted-foreground">Activa el flag <code className="bg-muted px-1 rounded">scheduling_enabled</code> en Settings → Bot para habilitarlo.</p>
+                  </div>
+                ) : (
+                  <div className="rounded-md border p-3 bg-muted/30 text-sm text-muted-foreground">
+                    El bot podrá consultar tu disponibilidad, mostrar horarios al cliente y registrar citas directamente desde el chat.
+                  </div>
+                )}
+                {isOwner && (
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      onClick={() => { setSelectedConnector(null); router.push("/api/integrations/calendly/auth"); }}
+                    >
+                      {calendlyStatus ? "Reconectar con Calendly" : "Conectar con Calendly"}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setSelectedConnector(null)}>Cancelar</Button>
+                  </div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Email Inbox instrucciones */}
+          <Dialog open={selectedConnector === "email_inbound"} onOpenChange={(o) => !o && setSelectedConnector(null)}>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Email Inbox — Setup</DialogTitle>
+                <DialogDescription>Recibe emails directamente en tu bandeja omnicanal.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 pt-2 text-sm">
+                <ol className="list-decimal list-inside space-y-3 text-muted-foreground">
+                  <li>
+                    Ve a <span className="font-medium text-foreground">Canales → Agregar canal → Email</span> y define
+                    la dirección de entrada (ej. <code className="bg-muted px-1 rounded">soporte@tu-dominio.com</code>).
+                  </li>
+                  <li>
+                    En <span className="font-medium text-foreground">Resend → Inbound</span>, configura el dominio
+                    y apunta el webhook a:<br />
+                    <code className="bg-muted px-1 rounded text-xs break-all">
+                      https://social.yd-engineering.cl/api/webhooks/email/inbound
+                    </code>
+                  </li>
+                  <li>
+                    Copia el <span className="font-medium text-foreground">Signing Secret</span> de Resend y agrégalo
+                    como variable de entorno <code className="bg-muted px-1 rounded">RESEND_INBOUND_WEBHOOK_SECRET</code>.
+                  </li>
+                  <li>
+                    Los emails entrantes aparecerán automáticamente en <span className="font-medium text-foreground">Bandeja → canal Email</span>{" "}
+                    y el bot responderá según tu configuración.
+                  </li>
+                </ol>
+                <Button variant="outline" className="w-full" onClick={() => setSelectedConnector(null)}>Cerrar</Button>
               </div>
             </DialogContent>
           </Dialog>

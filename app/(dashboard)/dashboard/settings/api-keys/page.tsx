@@ -70,7 +70,7 @@ export default function ApiKeysSettingsPage() {
         }
         setIsCreating(true);
         // Para simplificar, scopes fijos en esta demo
-        const result = await createApiKey({ label, scopes: ["contacts:read", "messages:write"] });
+        const result = await createApiKey({ label, scopes: ["all"] });
         if (result.success && result.data) {
             const newKey = result.data as ApiKeyWithSecret;
             setNewSecret(newKey.secret_key); // Mostrarlo SOLO una vez

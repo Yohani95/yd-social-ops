@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useDashboard } from "@/components/dashboard/dashboard-context";
+import { DashboardModuleHeader } from "@/components/dashboard/module-header";
 import type { ChatChannel } from "@/types";
 import {
   WhatsAppIcon,
@@ -36,36 +37,50 @@ interface ChatMessage {
   };
 }
 
-const CHANNEL_STYLES: Record<string, { bg: string; accent: string; label: string; icon: React.ReactNode }> = {
+const CHANNEL_STYLES: Record<
+  string,
+  {
+    bg: string;
+    accent: string;
+    label: string;
+    icon: React.ReactNode;
+    selectorActive: string;
+  }
+> = {
   whatsapp: {
     bg: "bg-[#0b141a]",
     accent: "bg-[#005c4b]",
     label: "WhatsApp",
-    icon: <WhatsAppIcon size={18} className="text-inherit" />
+    icon: <WhatsAppIcon size={18} className="text-[#25D366]" />,
+    selectorActive: "border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 shadow-sm",
   },
   messenger: {
     bg: "bg-[#0a1128]",
     accent: "bg-[#0084ff]",
     label: "Messenger",
-    icon: <MessengerIcon size={18} className="text-inherit" />
+    icon: <MessengerIcon size={18} className="text-[#0084ff]" />,
+    selectorActive: "border-blue-500/60 bg-blue-500/10 text-blue-700 dark:text-blue-300 shadow-sm",
   },
   tiktok: {
     bg: "bg-[#121212]",
     accent: "bg-[#ff0050]",
     label: "TikTok",
-    icon: <TikTokIcon size={18} className="text-inherit" />
+    icon: <TikTokIcon size={18} className="text-[#ff0050]" />,
+    selectorActive: "border-rose-500/60 bg-rose-500/10 text-rose-700 dark:text-rose-300 shadow-sm",
   },
   instagram: {
     bg: "bg-gradient-to-br from-purple-900 to-pink-900",
     accent: "bg-gradient-to-r from-purple-500 to-pink-500",
     label: "Instagram",
-    icon: <InstagramIcon size={18} className="text-inherit" />
+    icon: <InstagramIcon size={18} className="text-[#E1306C]" />,
+    selectorActive: "border-pink-500/60 bg-pink-500/10 text-pink-700 dark:text-pink-300 shadow-sm",
   },
   web: {
     bg: "bg-background",
     accent: "bg-primary",
     label: "Web Widget",
-    icon: <Globe size={18} className="text-inherit" />
+    icon: <Globe size={18} className="text-sky-600 dark:text-sky-300" />,
+    selectorActive: "border-primary/70 bg-primary/10 text-primary shadow-sm",
   },
 };
 
@@ -111,7 +126,7 @@ export default function SimulatorPage() {
         timestamp: new Date(),
       }]);
     }
-  }, [tenantId]);
+  }, [tenant?.bot_welcome_message, tenantId]);
 
   // Si tenant carga después (async), añadir welcome cuando la sesión está vacía
   useEffect(() => {
@@ -123,7 +138,7 @@ export default function SimulatorPage() {
         timestamp: new Date(),
       }]);
     }
-  }, [tenant?.bot_welcome_message]);
+  }, [messages.length, tenant?.bot_welcome_message]);
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -167,7 +182,7 @@ export default function SimulatorPage() {
       };
 
       setMessages((prev) => [...prev, botMsg]);
-    } catch (err) {
+    } catch {
       setMessages((prev) => [
         ...prev,
         {
@@ -185,15 +200,22 @@ export default function SimulatorPage() {
 
   return (
     <div className="space-y-4">
-      <div className="min-w-0">
-        <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
-          <Zap className="w-5 h-5 sm:w-6 sm:h-6 shrink-0" />
-          <span className="truncate">Simulador de Bot</span>
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Prueba tu bot como si fueras un cliente en cualquier canal
-        </p>
-      </div>
+      <DashboardModuleHeader
+        domain="channels"
+        icon={Zap}
+        title="Probar bot"
+        description="Simula conversaciones reales por canal para validar tono, respuestas y experiencia antes de publicar."
+        meta={(
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="text-[11px]">
+              Canal activo: {style.label}
+            </Badge>
+            <Badge variant="secondary" className="text-[11px]">
+              {messages.length} mensajes
+            </Badge>
+          </div>
+        )}
+      />
 
       {/* Channel selector */}
       <div className="flex gap-2 flex-wrap">
@@ -204,7 +226,7 @@ export default function SimulatorPage() {
               key={ch}
               onClick={() => setChannel(ch)}
               className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all flex items-center gap-2 ${channel === ch
-                ? "border-primary bg-primary/10 shadow-sm"
+                ? s.selectorActive
                 : "border-border hover:border-primary/50"
                 }`}
             >
@@ -220,7 +242,7 @@ export default function SimulatorPage() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Chat area */}
         <div className="lg:col-span-3">
-          <Card className="overflow-hidden">
+          <Card className="overflow-hidden yd-surface-transition">
             {/* Chat header */}
             <div className={`px-4 py-3 ${style.accent} text-white flex items-center gap-3`}>
               <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-sm">
@@ -314,7 +336,7 @@ export default function SimulatorPage() {
 
         {/* Info panel */}
         <div className="space-y-4">
-          <Card>
+          <Card className="yd-surface-transition">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
                 <Info className="w-4 h-4" />
@@ -353,7 +375,7 @@ export default function SimulatorPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="yd-surface-transition">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
                 <User className="w-4 h-4" />

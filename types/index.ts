@@ -5,12 +5,14 @@
 export type PlanTier = "basic" | "pro" | "business" | "enterprise" | "enterprise_plus";
 export type SubscriptionStatus = "active" | "inactive" | "trial";
 export type UserRole = "owner" | "admin" | "member";
-export type ChatChannel = "web" | "whatsapp" | "messenger" | "instagram" | "tiktok";
+export type ChatChannel = "web" | "whatsapp" | "messenger" | "instagram" | "tiktok" | "email";
 export type BusinessType = "products" | "services" | "professional" | "mixed";
 export type ContactAction = "payment_link" | "whatsapp_contact" | "email_contact" | "custom_message";
 export type BotTone = "formal" | "informal" | "amigable";
-export type ItemType = "product" | "service" | "info";
+export type ItemType = "product" | "service" | "info" | "delivery";
 export type AvailabilityType = "stock" | "calendar" | "quota";
+export type PricingMode = "fixed" | "from" | "quote" | "free";
+export type CatalogProfile = "generic" | "restaurant" | "dental" | "lodging" | "support" | "delivery";
 export type MerchantCheckoutMode = "mp_oauth" | "external_link" | "bank_transfer";
 export type MerchantAdHocLinkMode = "manual" | "approval" | "automatic";
 export type IntentType =
@@ -54,6 +56,7 @@ export interface Tenant {
   white_label_primary_color: string | null;
   // Negocio
   business_type: BusinessType;
+  catalog_profile?: CatalogProfile | null;
   business_description: string | null;
   business_address: string | null;
   contact_action: ContactAction;
@@ -80,6 +83,7 @@ export type TenantUpdate = Partial<
     | "name"
     | "business_name"
     | "business_type"
+    | "catalog_profile"
     | "business_description"
     | "business_address"
     | "contact_action"
@@ -131,6 +135,8 @@ export interface Product {
   keywords: string[] | null;
   image_url: string | null;
   item_type: ItemType;
+  pricing_mode?: PricingMode | null;
+  attributes?: Record<string, unknown> | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -140,7 +146,7 @@ export type ProductCreate = Pick<
   Product,
   "name" | "description" | "price" | "stock" | "keywords" | "image_url" | "item_type"
 > &
-  Partial<Pick<Product, "unit_label" | "availability_type" | "min_quantity" | "max_quantity">>;
+  Partial<Pick<Product, "unit_label" | "availability_type" | "min_quantity" | "max_quantity" | "pricing_mode" | "attributes">>;
 
 export type ProductUpdate = Partial<ProductCreate> & { is_active?: boolean };
 
@@ -204,6 +210,55 @@ export interface BotResponse {
 }
 
 export type ContactIntent = "buying" | "browsing" | "support";
+export type LeadStage =
+  | "new"
+  | "contacted"
+  | "qualified"
+  | "interested"
+  | "checkout"
+  | "customer"
+  | "lost";
+
+export type WorkflowTriggerType =
+  | "message_received"
+  | "comment_received"
+  | "lead_stage_changed"
+  | "payment_received"
+  | "scheduled_event";
+
+export type WorkflowConditionType =
+  | "message_contains"
+  | "intent_detected"
+  | "channel"
+  | "contact_tag"
+  | "product_interest"
+  | "payment_status";
+
+export type WorkflowActionType =
+  | "send_message"
+  | "generate_payment_link"
+  | "assign_agent"
+  | "change_lead_stage"
+  | "add_tag"
+  | "call_webhook"
+  | "delay";
+
+export type WorkflowStatus = "draft" | "published" | "archived";
+export type CampaignStatus = "draft" | "scheduled" | "running" | "completed" | "cancelled";
+export type CampaignRunStatus = "idle" | "queued" | "running" | "completed" | "failed";
+export type CampaignContactStatus = "queued" | "sent" | "delivered" | "read" | "failed" | "skipped";
+export type WorkflowRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type WorkflowNodeType = "trigger" | "condition" | "action";
+export type WorkflowEdgeType = "success" | "failure" | "true" | "false" | "next" | "timeout";
+export type AnalyticsActorType = "bot" | "human" | "system";
+export type AnalyticsEventType =
+  | "conversation_started"
+  | "lead_stage_changed"
+  | "payment_link_generated"
+  | "payment_completed"
+  | "campaign_sent"
+  | "campaign_failed"
+  | "workflow_executed";
 
 export interface Contact {
   id: string;
@@ -217,6 +272,11 @@ export interface Contact {
   notes: string | null;
   metadata: Record<string, unknown>;
   last_seen_at: string;
+  lead_stage: LeadStage;
+  lead_value: number;
+  assigned_tenant_user_id: string | null;
+  total_spent: number;
+  last_interaction_at: string;
   created_at: string;
   updated_at: string;
   /** ID del contacto canónico cuando es el mismo cliente en otro canal (deduplicación). */
@@ -386,6 +446,9 @@ export interface ConversationThread {
   user_identifier: string;
   contact_id: string | null;
   status: ThreadStatus;
+  lead_stage_snapshot: LeadStage | null;
+  lead_value_snapshot: number | null;
+  assigned_tenant_user_id: string | null;
   last_message_at: string;
   unread_count: number;
   created_at: string;
@@ -496,6 +559,26 @@ export interface ActionResult<T = void> {
   success: boolean;
   data?: T;
   error?: string;
+}
+
+export interface SetupRequiredApiResponse<T = unknown> {
+  success?: boolean;
+  data?: T;
+  error?: string;
+  setup_required?: true;
+  setup_module?: "workflows" | "campaigns" | "routing";
+  plan_required?: PlanTier;
+  readiness_status?: "ready" | "setup_required" | "plan_upgrade_required";
+  migration_file?: string;
+  message?: string;
+}
+
+export interface TeamMemberLite {
+  id: string;
+  user_id: string;
+  role: UserRole;
+  email: string | null;
+  display_name: string;
 }
 
 // ============================================================
@@ -645,4 +728,234 @@ export interface QualityMetrics {
   avg_coherence_score: number | null;
   intent_breakdown: Record<string, number>;
   provider_breakdown: Record<string, number>;
+}
+
+// ============================================================
+// WORKFLOWS / CAMPAIGNS / ROUTING / ANALYTICS
+// ============================================================
+
+export interface AutomationWorkflow {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string | null;
+  status: WorkflowStatus;
+  is_active: boolean;
+  trigger_type: WorkflowTriggerType;
+  version: number;
+  created_by_user_id: string | null;
+  health_status?: "active" | "inactive" | "incomplete";
+  last_run_status?: WorkflowRunStatus | null;
+  last_run_at?: string | null;
+  runs_24h?: number;
+  failed_runs_24h?: number;
+  nodes_count?: number;
+  actions_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutomationNode {
+  id: string;
+  tenant_id: string;
+  workflow_id: string;
+  node_type: WorkflowNodeType;
+  sequence_order: number;
+  label: string;
+  config: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutomationEdge {
+  id: string;
+  tenant_id: string;
+  workflow_id: string;
+  source_node_id: string;
+  target_node_id: string;
+  edge_type: WorkflowEdgeType;
+  condition_expr: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutomationRun {
+  id: string;
+  tenant_id: string;
+  workflow_id: string;
+  trigger_event_id: string | null;
+  status: WorkflowRunStatus;
+  run_context: Record<string, unknown>;
+  execution_log: Array<Record<string, unknown>>;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  dedupe_key: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Campaign {
+  id: string;
+  tenant_id: string;
+  name: string;
+  message_template: string;
+  filters: Record<string, unknown>;
+  channels: ChatChannel[];
+  status: CampaignStatus;
+  scheduled_at: string | null;
+  run_status?: CampaignRunStatus | null;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  processed_count?: number | null;
+  sent_count?: number | null;
+  failed_count?: number | null;
+  skipped_count?: number | null;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignContact {
+  id: string;
+  tenant_id: string;
+  campaign_id: string;
+  contact_id: string;
+  channel: ChatChannel;
+  status: CampaignContactStatus;
+  provider_message_id: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignEvent {
+  id: string;
+  tenant_id: string;
+  campaign_id: string;
+  contact_id: string | null;
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CampaignExecutionSummary {
+  campaign_id: string;
+  status: CampaignStatus;
+  scheduled_at: string | null;
+  last_sent_at: string | null;
+  last_failed_at: string | null;
+  processed: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  queued: number;
+  next_action: "send_now" | "wait_scheduled" | "monitor" | "none";
+  next_action_detail: string;
+}
+
+export interface RoutingRule {
+  id: string;
+  tenant_id: string;
+  name: string;
+  priority: number;
+  is_active: boolean;
+  condition: Record<string, unknown>;
+  target_team: string;
+  target_tenant_user_id: string | null;
+  health_status?: "active" | "inactive" | "requires_setup";
+  last_applied_at?: string | null;
+  applied_count_24h?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AnalyticsEvent {
+  id: string;
+  tenant_id: string;
+  event_type: AnalyticsEventType;
+  channel: ChatChannel | null;
+  contact_id: string | null;
+  thread_id: string | null;
+  workflow_id: string | null;
+  campaign_id: string | null;
+  product_id: string | null;
+  amount: number | null;
+  currency: string | null;
+  actor_type: AnalyticsActorType;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface IntegrationWebhook {
+  id: string;
+  tenant_id: string;
+  name: string;
+  target_url: string;
+  secret: string | null;
+  subscribed_events: string[];
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowContext {
+  tenantId: string;
+  triggerType: WorkflowTriggerType;
+  channel?: ChatChannel;
+  message?: string;
+  intentDetected?: IntentType | null;
+  paymentStatus?: string | null;
+  productInterest?: string | null;
+  contactId?: string | null;
+  threadId?: string | null;
+  senderId?: string | null;
+  contactTags?: string[];
+  metadata?: Record<string, unknown>;
+  triggerEventId?: string | null;
+}
+
+export type QASuiteStatus = "passed" | "failed" | "running" | "skipped";
+
+export interface QATestCaseResult {
+  id: string;
+  name: string;
+  status: QASuiteStatus;
+  reason?: string;
+  duration_ms?: number;
+  evidence?: Array<Record<string, unknown>>;
+}
+
+export interface QASuiteResult {
+  suite: "smoke" | "flows" | "bot-scorecard";
+  status: QASuiteStatus;
+  started_at: string;
+  finished_at: string;
+  duration_ms: number;
+  passed: number;
+  failed: number;
+  errors: string[];
+  evidence: Array<Record<string, unknown>>;
+  tests: QATestCaseResult[];
+}
+
+export interface BotScorecardResult {
+  scenario_id: string;
+  scenario_name: string;
+  expected_intent: IntentType;
+  actual_intent: IntentType | "unknown";
+  score: number;
+  passed: boolean;
+  reasons: string[];
+  response_preview: string;
+}
+
+export interface QARunSummary {
+  id: string;
+  tenant_id: string;
+  status: QASuiteStatus;
+  started_at: string;
+  finished_at: string;
+  suites: QASuiteResult[];
+  meta: Record<string, unknown>;
 }

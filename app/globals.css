@@ -37,6 +37,11 @@
     --sidebar-accent-foreground: 210 20% 98%;
     --sidebar-border: 215 27.9% 16.9%;
     --sidebar-ring: 262.1 83.3% 57.8%;
+    --domain-workflows: 236 72% 57%;
+    --domain-channels: 153 72% 38%;
+    --domain-catalog: 36 92% 52%;
+    --domain-inbox: 203 89% 54%;
+    --domain-integrations: 192 90% 46%;
   }
 
   .dark {
@@ -74,5 +79,15 @@
   body {
     @apply bg-background text-foreground;
     min-height: 100dvh;
+  }
+}
+
+@layer utilities {
+  .yd-surface-transition {
+    @apply transition-all duration-200 ease-out motion-reduce:transition-none;
+  }
+
+  .yd-soft-hover {
+    @apply hover:shadow-sm hover:-translate-y-0.5 motion-reduce:hover:translate-y-0;
   }
 }

@@ -1,5 +1,5 @@
 import type { SocialChannel } from "@/types";
-import type { ChannelAdapter, ParsedMessage } from "./index";
+import type { ChannelAdapter, ParsedMessage, SendReplyOptions } from "./index";
 
 /**
  * TikTok for Business Adapter
@@ -38,12 +38,19 @@ export class TikTokAdapter implements ChannelAdapter {
     }
   }
 
-  async sendReply(to: string, message: string, config: SocialChannel): Promise<void> {
+  async sendReply(
+    to: string,
+    message: string,
+    config: SocialChannel,
+    options?: SendReplyOptions
+  ): Promise<void> {
     const accessToken = config.access_token;
     const openId = config.provider_config?.open_id as string;
 
     if (!accessToken || !openId) {
-      console.warn("[TikTok] No se puede enviar: falta access_token o open_id");
+      const errMessage = "[TikTok] No se puede enviar: falta access_token o open_id";
+      console.warn(errMessage);
+      if (options?.throwOnError) throw new Error(errMessage);
       return;
     }
 
@@ -65,6 +72,9 @@ export class TikTokAdapter implements ChannelAdapter {
     if (!response.ok) {
       const err = await response.text();
       console.error("[TikTok] Error enviando DM:", err);
+      if (options?.throwOnError) {
+        throw new Error(`[TikTok] ${err}`);
+      }
     }
   }
 

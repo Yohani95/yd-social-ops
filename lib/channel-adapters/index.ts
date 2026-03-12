@@ -4,6 +4,7 @@ import { MessengerAdapter } from "./messenger";
 import { InstagramAdapter } from "./instagram";
 import { TikTokAdapter } from "./tiktok";
 import { GenericAdapter } from "./generic";
+import { EmailAdapter } from "./email";
 
 export interface ParsedMessage {
   senderId: string;
@@ -15,9 +16,20 @@ export interface ParsedMessage {
   audioUrl?: string;
 }
 
+export interface SendReplyOptions {
+  throwOnError?: boolean;
+  mediaUrl?: string;
+  mediaType?: "image";
+}
+
 export interface ChannelAdapter {
   parseIncoming(body: unknown): ParsedMessage | null;
-  sendReply(to: string, message: string, config: SocialChannel): Promise<void>;
+  sendReply(
+    to: string,
+    message: string,
+    config: SocialChannel,
+    options?: SendReplyOptions
+  ): Promise<void>;
   formatMessage(message: string): string;
 }
 
@@ -26,6 +38,7 @@ const adapters: Record<string, ChannelAdapter> = {
   messenger: new MessengerAdapter(),
   instagram: new InstagramAdapter(),
   tiktok: new TikTokAdapter(),
+  email: new EmailAdapter(),
   web: new GenericAdapter(),
 };
 

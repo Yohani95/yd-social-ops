@@ -1,5 +1,5 @@
 import type { SocialChannel } from "@/types";
-import type { ChannelAdapter, ParsedMessage } from "./index";
+import type { ChannelAdapter, ParsedMessage, SendReplyOptions } from "./index";
 
 /**
  * Instagram Messaging API Adapter
@@ -48,6 +48,7 @@ export class InstagramAdapter implements ChannelAdapter {
             message?: {
               text?: string;
               mid?: string;
+              is_echo?: boolean;
               attachments?: Array<{
                 type?: string;
                 mime_type?: string;
@@ -61,33 +62,36 @@ export class InstagramAdapter implements ChannelAdapter {
       if (data?.object !== "instagram") return null;
 
       const entry = data?.entry?.[0];
-      const messaging = entry?.messaging?.[0];
+      const events = entry?.messaging || [];
 
-      if (!messaging?.sender?.id) return null;
+      for (const messaging of events) {
+        if (!messaging?.sender?.id) continue;
+        const msg = messaging.message;
+        if (!msg || msg.is_echo === true) continue;
 
-      const msg = messaging.message;
-      if (msg?.text) {
-        return {
-          senderId: messaging.sender.id,
-          message: msg.text,
-          metadata: {
-            ig_account_id: entry?.id,
-            message_id: msg.mid,
-          },
-        };
-      }
+        if (msg.text) {
+          return {
+            senderId: messaging.sender.id,
+            message: msg.text,
+            metadata: {
+              ig_account_id: entry?.id,
+              message_id: msg.mid,
+            },
+          };
+        }
 
-      const audioUrl = this.extractAudioUrl(msg?.attachments);
-      if (audioUrl) {
-        return {
-          senderId: messaging.sender.id,
-          message: "",
-          metadata: {
-            ig_account_id: entry?.id,
-            message_id: msg?.mid,
-          },
-          audioUrl,
-        };
+        const audioUrl = this.extractAudioUrl(msg.attachments);
+        if (audioUrl) {
+          return {
+            senderId: messaging.sender.id,
+            message: "",
+            metadata: {
+              ig_account_id: entry?.id,
+              message_id: msg.mid,
+            },
+            audioUrl,
+          };
+        }
       }
 
       return null;
@@ -96,31 +100,81 @@ export class InstagramAdapter implements ChannelAdapter {
     }
   }
 
-  async sendReply(to: string, message: string, config: SocialChannel): Promise<void> {
+  async sendReply(
+    to: string,
+    message: string,
+    config: SocialChannel,
+    options?: SendReplyOptions
+  ): Promise<void> {
     const accessToken = config.access_token;
 
     if (!accessToken) {
-      console.warn("[Instagram] No se puede enviar: falta access_token");
+      const errMessage = "[Instagram] No se puede enviar: falta access_token";
+      console.warn(errMessage);
+      if (options?.throwOnError) throw new Error(errMessage);
       return;
     }
 
     const url = "https://graph.facebook.com/v21.0/me/messages";
 
+    const hasImage = options?.mediaType === "image" && typeof options.mediaUrl === "string" && options.mediaUrl.trim().length > 0;
     const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        recipient: { id: to },
-        message: { text: this.formatMessage(message) },
-        access_token: accessToken,
-      }),
+      body: JSON.stringify(
+        hasImage
+          ? {
+              recipient: { id: to },
+              message: {
+                attachment: {
+                  type: "image",
+                  payload: {
+                    url: options.mediaUrl?.trim(),
+                    is_reusable: false,
+                  },
+                },
+              },
+              access_token: accessToken,
+            }
+          : {
+              recipient: { id: to },
+              message: { text: this.formatMessage(message) },
+              access_token: accessToken,
+            }
+      ),
     });
 
     if (!response.ok) {
       const err = await response.text();
       console.error("[Instagram] Error enviando mensaje:", err);
+      if (options?.throwOnError) {
+        throw new Error(`[Instagram] ${err}`);
+      }
+    }
+
+    // Si se envió imagen y además hay texto, se envía texto en un segundo mensaje.
+    if (response.ok && hasImage && message.trim().length > 0) {
+      const textResponse = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          recipient: { id: to },
+          message: { text: this.formatMessage(message) },
+          access_token: accessToken,
+        }),
+      });
+
+      if (!textResponse.ok) {
+        const err = await textResponse.text();
+        console.error("[Instagram] Error enviando texto tras imagen:", err);
+        if (options?.throwOnError) {
+          throw new Error(`[Instagram] ${err}`);
+        }
+      }
     }
   }
 

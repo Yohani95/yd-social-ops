@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { GoogleIcon } from "@/components/auth/google-icon";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 
@@ -30,6 +31,7 @@ function RegisterForm() {
     confirmPassword: "",
   });
   const [loading, setLoading] = useState(false);
+  const [oauthLoadingProvider, setOauthLoadingProvider] = useState<"google" | null>(null);
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -76,6 +78,34 @@ function RegisterForm() {
     router.push(`/login?next=${encodeURIComponent(nextPath)}`);
   }
 
+  async function handleGoogleRegister() {
+    setOauthLoadingProvider("google");
+
+    const supabase = createClient();
+    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo,
+        queryParams: { prompt: "select_account" },
+        skipBrowserRedirect: true,
+      },
+    });
+
+    if (error || !data?.url) {
+      const isDisabledProvider = error?.message.toLowerCase().includes("provider is not enabled");
+      toast.error(
+        isDisabledProvider
+          ? "Google no esta habilitado en Supabase. Activalo en Authentication > Providers."
+          : "No se pudo continuar con Google"
+      );
+      setOauthLoadingProvider(null);
+      return;
+    }
+
+    window.location.assign(data.url);
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted/50 p-4">
       <div className="w-full max-w-md min-w-0">
@@ -106,6 +136,37 @@ function RegisterForm() {
 
           <form onSubmit={handleRegister}>
             <CardContent className="space-y-4">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={loading || Boolean(oauthLoadingProvider)}
+                onClick={handleGoogleRegister}
+              >
+                {oauthLoadingProvider === "google" ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Redirigiendo...
+                  </>
+                ) : (
+                  <>
+                    <GoogleIcon />
+                    Continuar con Google
+                  </>
+                )}
+              </Button>
+
+              {/* Inicio con Facebook temporalmente desactivado. */}
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">o crea tu cuenta con email</span>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Tu nombre</Label>
@@ -197,7 +258,7 @@ function RegisterForm() {
             </CardContent>
 
             <CardFooter className="flex flex-col gap-4">
-              <Button type="submit" className="w-full" disabled={loading}>
+              <Button type="submit" className="w-full" disabled={loading || Boolean(oauthLoadingProvider)}>
                 {loading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />

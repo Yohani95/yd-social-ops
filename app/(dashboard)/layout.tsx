@@ -4,6 +4,7 @@ import { DashboardSidebar } from "@/components/dashboard/sidebar";
 import { DashboardHeader } from "@/components/dashboard/header";
 import { BottomNav } from "@/components/dashboard/bottom-nav";
 import { DashboardProvider } from "@/components/dashboard/dashboard-context";
+import { DashboardRouteTransition } from "@/components/dashboard/route-transition";
 import { SidebarProvider } from "@/components/dashboard/sidebar-context";
 import { hexToHslString } from "@/lib/utils";
 import type { UserRole } from "@/types";
@@ -60,7 +61,7 @@ export default async function DashboardLayout({
       <div className="flex h-screen overflow-hidden bg-background">
         <DashboardSidebar tenant={tenant} userRole={tenantUser?.role} />
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-          <DashboardHeader user={user} tenant={tenant} />
+          <DashboardHeader user={user} tenantId={tenantUser?.tenant_id || ""} planTier={tenant?.plan_tier || "basic"} />
           <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-[calc(1rem+3.5rem)] lg:pb-6">
             <DashboardProvider
               value={{
@@ -70,7 +71,7 @@ export default async function DashboardLayout({
                 userId: user.id,
               }}
             >
-              {children}
+              <DashboardRouteTransition>{children}</DashboardRouteTransition>
             </DashboardProvider>
           </main>
         </div>

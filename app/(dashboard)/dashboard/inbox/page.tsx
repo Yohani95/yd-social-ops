@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Fragment } from "react";
 import {
   Inbox,
   Loader2,
@@ -20,10 +20,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { WhatsAppIcon, MessengerIcon, InstagramIcon, TikTokIcon } from "@/components/ui/social-icons";
 import { useDashboard } from "@/components/dashboard/dashboard-context";
+import { DashboardModuleHeader } from "@/components/dashboard/module-header";
+import { MemberSelect } from "@/components/dashboard/member-select";
 import type {
   ChatChannel,
   ConversationMessage,
   ConversationThread,
+  LeadStage,
   OffsetPagination,
   ThreadStatus,
 } from "@/types";
@@ -47,6 +50,26 @@ const STATUS_OPTIONS: Array<{ value: "all" | ThreadStatus; label: string }> = [
   { value: "closed", label: "Closed" },
 ];
 
+const LEAD_STAGE_OPTIONS: LeadStage[] = [
+  "new",
+  "contacted",
+  "qualified",
+  "interested",
+  "checkout",
+  "customer",
+  "lost",
+];
+
+const LEAD_STAGE_LABELS: Record<LeadStage, string> = {
+  new: "Nuevo",
+  contacted: "Contactado",
+  qualified: "Calificado",
+  interested: "Interesado",
+  checkout: "Checkout",
+  customer: "Cliente",
+  lost: "Perdido",
+};
+
 function channelLabel(channel: ChatChannel): string {
   if (channel === "whatsapp") return "WhatsApp";
   if (channel === "messenger") return "Messenger";
@@ -67,6 +90,22 @@ function statusVariant(status: ThreadStatus): "secondary" | "warning" | "success
   if (status === "open") return "success";
   if (status === "pending") return "warning";
   return "secondary";
+}
+
+const URL_REGEX = /(https?:\/\/[^\s,)>\]"]+)/g;
+
+function renderContent(text: string) {
+  const parts = text.split(URL_REGEX);
+  return parts.map((part, i) =>
+    URL_REGEX.test(part) ? (
+      <a key={i} href={part} target="_blank" rel="noopener noreferrer"
+        className="underline text-primary break-all hover:opacity-80">
+        {part}
+      </a>
+    ) : (
+      <Fragment key={i}>{part}</Fragment>
+    )
+  );
 }
 
 export default function InboxPage() {
@@ -90,6 +129,10 @@ export default function InboxPage() {
   const [threadsHasMore, setThreadsHasMore] = useState(false);
   const [messagesOffset, setMessagesOffset] = useState(0);
   const [messagesHasMore, setMessagesHasMore] = useState(false);
+  const [leadStage, setLeadStage] = useState<LeadStage>("new");
+  const [leadValue, setLeadValue] = useState("0");
+  const [assignedTenantUserId, setAssignedTenantUserId] = useState("");
+  const [updatingLead, setUpdatingLead] = useState(false);
 
   function threadMatchesFilters(thread: ConversationThread): boolean {
     if (channelFilter !== "all" && thread.channel !== channelFilter) return false;
@@ -242,6 +285,14 @@ export default function InboxPage() {
     [threads, selectedThreadId]
   );
 
+  useEffect(() => {
+    if (!selectedThread) return;
+    setLeadStage((selectedThread.lead_stage_snapshot || "new") as LeadStage);
+    setLeadValue(String(selectedThread.lead_value_snapshot ?? 0));
+    setAssignedTenantUserId(selectedThread.assigned_tenant_user_id || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedThread?.id]);
+
   async function handleStatusChange(status: ThreadStatus) {
     if (!selectedThread) return;
 
@@ -260,6 +311,34 @@ export default function InboxPage() {
 
     toast.success("Estado actualizado");
     await loadThreads(true);
+  }
+
+  async function handleLeadUpdate() {
+    if (!selectedThread) return;
+    setUpdatingLead(true);
+    try {
+      const res = await fetch(`/api/inbox/threads/${selectedThread.id}/lead`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lead_stage: leadStage,
+          lead_value: Number(leadValue || 0),
+          assigned_tenant_user_id: assignedTenantUserId.trim() || null,
+        }),
+      });
+      const data = (await res.json()) as { error?: string; data?: ConversationThread };
+      if (!res.ok) {
+        throw new Error(data.error || "No se pudo actualizar lead");
+      }
+      if (data.data) {
+        setThreads((prev) => (prev || []).map((thread) => (thread.id === data.data!.id ? data.data! : thread)));
+      }
+      toast.success("Lead actualizado");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo actualizar lead");
+    } finally {
+      setUpdatingLead(false);
+    }
   }
 
   async function handleReply() {
@@ -396,17 +475,22 @@ export default function InboxPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
-            <Inbox className="w-5 h-5 sm:w-6 sm:h-6 shrink-0" />
-            <span className="truncate">Bandeja</span>
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Conversaciones unificadas por canal para responder manualmente
-          </p>
-        </div>
-        {isOwner ? (
+      <DashboardModuleHeader
+        domain="inbox"
+        icon={Inbox}
+        title="Bandeja omnicanal"
+        description="Conversaciones unificadas por canal con filtros rapidos, CRM operativo y respuesta manual."
+        meta={(
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="text-[11px]">
+              {threads.length} conversaciones
+            </Badge>
+            <Badge variant="secondary" className="text-[11px]">
+              {selectedThreadId ? "Thread activo" : "Sin seleccion"}
+            </Badge>
+          </div>
+        )}
+        actions={isOwner ? (
           <Button
             variant="outline"
             size="sm"
@@ -417,10 +501,10 @@ export default function InboxPage() {
             Importar historial desde Chat Logs
           </Button>
         ) : null}
-      </div>
+      />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <Card className={`xl:col-span-1 ${selectedThreadId ? "hidden xl:block" : ""}`}>
+        <Card className={`xl:col-span-1 yd-surface-transition ${selectedThreadId ? "hidden xl:block" : ""}`}>
           <CardHeader>
             <CardTitle className="text-base">Threads</CardTitle>
             <CardDescription>{threads.length} conversaciones</CardDescription>
@@ -511,7 +595,7 @@ export default function InboxPage() {
           </CardContent>
         </Card>
 
-        <Card className={`xl:col-span-2 ${!selectedThreadId ? "hidden xl:block" : ""}`}>
+        <Card className={`xl:col-span-2 yd-surface-transition ${!selectedThreadId ? "hidden xl:block" : ""}`}>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <button
@@ -544,6 +628,51 @@ export default function InboxPage() {
               <Button variant="outline" size="sm" disabled={!selectedThread} onClick={() => void handleStatusChange("closed")}>
                 Closed
               </Button>
+            </div>
+
+            <div className="rounded-md border p-3 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Perfil CRM</p>
+              <div className="grid sm:grid-cols-3 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium" htmlFor="lead-stage">Etapa del lead</label>
+                  <select
+                    id="lead-stage"
+                    className="w-full h-9 rounded-md border bg-background px-2 text-sm"
+                    value={leadStage}
+                    onChange={(e) => setLeadStage(e.target.value as LeadStage)}
+                    disabled={!selectedThread}
+                  >
+                    {LEAD_STAGE_OPTIONS.map((stage) => (
+                      <option key={stage} value={stage}>{LEAD_STAGE_LABELS[stage]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium" htmlFor="lead-value">Valor del lead</label>
+                  <Input
+                    id="lead-value"
+                    value={leadValue}
+                    onChange={(e) => setLeadValue(e.target.value)}
+                    placeholder="0"
+                    disabled={!selectedThread}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium" htmlFor="assigned-user">Agente asignado</label>
+                  <MemberSelect
+                    id="assigned-user"
+                    value={assignedTenantUserId}
+                    onChange={setAssignedTenantUserId}
+                    disabled={!selectedThread}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button size="sm" variant="secondary" onClick={() => void handleLeadUpdate()} disabled={!selectedThread || updatingLead}>
+                  {updatingLead ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                  Guardar perfil CRM
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -583,7 +712,7 @@ export default function InboxPage() {
                         {new Date(message.created_at).toLocaleString("es-CL")}
                       </span>
                     </div>
-                    <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                    <p className="whitespace-pre-wrap break-words">{renderContent(message.content)}</p>
                   </div>
                 ))
               )}

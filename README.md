@@ -1,4 +1,4 @@
-﻿# YD Social Ops
+# YD Social Ops
 
 Plataforma SaaS para automatizar ventas y atencion en WhatsApp, Messenger, Instagram, TikTok y Web.
 
@@ -57,6 +57,8 @@ Plataforma SaaS para automatizar ventas y atencion en WhatsApp, Messenger, Insta
 - `META_APP_SECRET`
 - `META_WEBHOOK_VERIFY_TOKEN`
 - `NEXT_PUBLIC_META_APP_ID`
+- `NEXT_PUBLIC_META_PIXEL_ENABLED` (`true` solo en produccion)
+- `NEXT_PUBLIC_META_PIXEL_ID`
 
 ### Mercado Pago
 
@@ -151,9 +153,27 @@ Prioridad efectiva de proveedor (runtime):
 - `npm run build`
 - `npm run start`
 - `npm run lint`
+- `npm run qa:smoke`
+- `npm run qa:flows`
+- `npm run qa:bot-scorecard`
+- `npm run qa:regression`
+
+## QA automatizado
+
+- Vista QA (solo desarrollo): `/dashboard/qa`
+- Endpoints QA (solo desarrollo):
+  - `GET /api/qa/history`
+  - `POST /api/qa/run`
+- Variables para regression real:
+  - `E2E_EMAIL`
+  - `E2E_PASSWORD`
+  - `E2E_TENANT_ID`
+  - `E2E_BASE_URL` (default `http://127.0.0.1:3000`)
+- QA no es modulo para cliente final. Se usa como gate interno de release.
 
 ## Documentacion
 
+- [Primeros 30 minutos](./docs/PRIMEROS-30-MINUTOS.md)
 - [Configuracion](./docs/CONFIGURACION.md)
 - [Pruebas de release](./docs/PRUEBAS-RELEASE.md)
 - [Matriz Mercado Pago](./docs/mercadopago-envs.md)

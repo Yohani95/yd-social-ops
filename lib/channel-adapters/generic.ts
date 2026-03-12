@@ -1,11 +1,11 @@
 import type { SocialChannel } from "@/types";
-import type { ChannelAdapter, ParsedMessage } from "./index";
+import type { ChannelAdapter, ParsedMessage, SendReplyOptions } from "./index";
 
 /**
  * Generic Adapter
  *
- * Formato simple para el webhook genérico y el web widget.
- * La respuesta se devuelve en el body HTTP, no se envía activamente.
+ * Formato simple para el webhook generico y el web widget.
+ * La respuesta se devuelve en el body HTTP, no se envia activamente.
  */
 export class GenericAdapter implements ChannelAdapter {
   parseIncoming(body: unknown): ParsedMessage | null {
@@ -28,8 +28,13 @@ export class GenericAdapter implements ChannelAdapter {
     }
   }
 
-  async sendReply(_to: string, _message: string, _config: SocialChannel): Promise<void> {
-    // No-op: la respuesta se envía en el body HTTP del webhook genérico
+  async sendReply(
+    _to: string,
+    _message: string,
+    _config: SocialChannel,
+    _options?: SendReplyOptions
+  ): Promise<void> {
+    // No-op: la respuesta se devuelve por HTTP en web/generico.
   }
 
   formatMessage(message: string): string {

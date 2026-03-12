@@ -67,10 +67,17 @@ export async function getAuthenticatedContext() {
 
   if (!tenantUser) return null;
 
+  const { data: tenant } = await admin
+    .from("tenants")
+    .select("plan_tier")
+    .eq("id", tenantUser.tenant_id)
+    .maybeSingle();
+
   return {
     userId: user.id,
     tenantId: tenantUser.tenant_id as string,
     userRole: tenantUser.role as string,
+    tenantPlanTier: (tenant?.plan_tier as string | undefined) || "basic",
     supabase: admin,
   };
 }

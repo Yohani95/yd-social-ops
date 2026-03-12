@@ -1,5 +1,5 @@
 import type { SocialChannel } from "@/types";
-import type { ChannelAdapter, ParsedMessage } from "./index";
+import type { ChannelAdapter, ParsedMessage, SendReplyOptions } from "./index";
 
 /**
  * Facebook Messenger Adapter
@@ -47,6 +47,7 @@ export class MessengerAdapter implements ChannelAdapter {
             message?: {
               text?: string;
               mid?: string;
+              is_echo?: boolean;
               attachments?: Array<{
                 type?: string;
                 mime_type?: string;
@@ -58,33 +59,36 @@ export class MessengerAdapter implements ChannelAdapter {
       };
 
       const entry = data?.entry?.[0];
-      const messaging = entry?.messaging?.[0];
+      const events = entry?.messaging || [];
 
-      if (!messaging?.sender?.id) return null;
+      for (const messaging of events) {
+        if (!messaging?.sender?.id) continue;
+        const msg = messaging.message;
+        if (!msg || msg.is_echo === true) continue;
 
-      const msg = messaging.message;
-      if (msg?.text) {
-        return {
-          senderId: messaging.sender.id,
-          message: msg.text,
-          metadata: {
-            page_id: entry?.id,
-            message_id: msg.mid,
-          },
-        };
-      }
+        if (msg.text) {
+          return {
+            senderId: messaging.sender.id,
+            message: msg.text,
+            metadata: {
+              page_id: entry?.id,
+              message_id: msg.mid,
+            },
+          };
+        }
 
-      const audioUrl = this.extractAudioUrl(msg?.attachments);
-      if (audioUrl) {
-        return {
-          senderId: messaging.sender.id,
-          message: "",
-          metadata: {
-            page_id: entry?.id,
-            message_id: msg?.mid,
-          },
-          audioUrl,
-        };
+        const audioUrl = this.extractAudioUrl(msg.attachments);
+        if (audioUrl) {
+          return {
+            senderId: messaging.sender.id,
+            message: "",
+            metadata: {
+              page_id: entry?.id,
+              message_id: msg.mid,
+            },
+            audioUrl,
+          };
+        }
       }
 
       return null;
@@ -93,21 +97,43 @@ export class MessengerAdapter implements ChannelAdapter {
     }
   }
 
-  async sendReply(to: string, message: string, config: SocialChannel): Promise<void> {
+  async sendReply(
+    to: string,
+    message: string,
+    config: SocialChannel,
+    options?: SendReplyOptions
+  ): Promise<void> {
     const accessToken = config.access_token;
 
     if (!accessToken) {
-      console.warn("[Messenger] No se puede enviar: falta access_token");
+      const errMessage = "[Messenger] No se puede enviar: falta access_token";
+      console.warn(errMessage);
+      if (options?.throwOnError) throw new Error(errMessage);
       return;
     }
 
     const url = "https://graph.facebook.com/v21.0/me/messages";
 
-    const bodyToSend = {
-      recipient: { id: to },
-      message: { text: this.formatMessage(message) },
-      access_token: accessToken,
-    };
+    const hasImage = options?.mediaType === "image" && typeof options.mediaUrl === "string" && options.mediaUrl.trim().length > 0;
+    const bodyToSend = hasImage
+      ? {
+          recipient: { id: to },
+          message: {
+            attachment: {
+              type: "image",
+              payload: {
+                url: options.mediaUrl?.trim(),
+                is_reusable: false,
+              },
+            },
+          },
+          access_token: accessToken,
+        }
+      : {
+          recipient: { id: to },
+          message: { text: this.formatMessage(message) },
+          access_token: accessToken,
+        };
 
     const response = await fetch(url, {
       method: "POST",
@@ -120,6 +146,32 @@ export class MessengerAdapter implements ChannelAdapter {
     if (!response.ok) {
       const err = await response.text();
       console.error("[Messenger] Error enviando mensaje:", err);
+      if (options?.throwOnError) {
+        throw new Error(`[Messenger] ${err}`);
+      }
+    }
+
+    // Si se envió imagen y también hay texto, enviamos un segundo mensaje de texto.
+    if (response.ok && hasImage && message.trim().length > 0) {
+      const textResponse = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          recipient: { id: to },
+          message: { text: this.formatMessage(message) },
+          access_token: accessToken,
+        }),
+      });
+
+      if (!textResponse.ok) {
+        const err = await textResponse.text();
+        console.error("[Messenger] Error enviando texto tras imagen:", err);
+        if (options?.throwOnError) {
+          throw new Error(`[Messenger] ${err}`);
+        }
+      }
     }
   }
 

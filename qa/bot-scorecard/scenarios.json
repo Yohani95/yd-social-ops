@@ -1,0 +1,130 @@
+[
+  {
+    "id": "purchase-intent-basic",
+    "name": "Compra directa",
+    "prompt": "Hola, quiero comprar hoy y saber precios",
+    "expected_intent": "purchase_intent",
+    "requires_payment_hint": false,
+    "requires_contact_hint": false
+  },
+  {
+    "id": "inquiry-info",
+    "name": "Consulta general",
+    "prompt": "Hola, me puedes contar como funciona su servicio?",
+    "expected_intent": "inquiry",
+    "requires_payment_hint": false,
+    "requires_contact_hint": false
+  },
+  {
+    "id": "complaint-support",
+    "name": "Reclamo de cliente",
+    "prompt": "No me llego lo prometido y estoy molesto con la atencion",
+    "expected_intent": "complaint",
+    "requires_payment_hint": false,
+    "requires_contact_hint": true
+  },
+  {
+    "id": "greeting-smalltalk",
+    "name": "Saludo simple",
+    "prompt": "Hola! Buenas tardes",
+    "expected_intent": "greeting",
+    "requires_payment_hint": false,
+    "requires_contact_hint": false
+  },
+  {
+    "id": "ambiguous-request",
+    "name": "Mensaje ambiguo",
+    "prompt": "mmm no se, estaba mirando nomas",
+    "expected_intent": "unknown",
+    "requires_payment_hint": false,
+    "requires_contact_hint": false
+  },
+  {
+    "id": "payment-request",
+    "name": "Solicitud de pago",
+    "prompt": "Quiero pagar ahora mismo, enviame el link de pago",
+    "expected_intent": "purchase_intent",
+    "requires_payment_hint": true,
+    "requires_contact_hint": false
+  },
+  {
+    "id": "restaurant-reservation",
+    "name": "Reserva restaurante",
+    "prompt": "Quiero reservar mesa para 4 personas hoy en la noche",
+    "expected_intent": "purchase_intent",
+    "requires_payment_hint": false,
+    "requires_contact_hint": false
+  },
+  {
+    "id": "delivery-order",
+    "name": "Pedido delivery",
+    "prompt": "Hola, quiero pedir delivery a domicilio y pagar hoy",
+    "expected_intent": "purchase_intent",
+    "requires_payment_hint": true,
+    "requires_contact_hint": false
+  },
+  {
+    "id": "dentist-appointment",
+    "name": "Agenda dentista",
+    "prompt": "Quiero agendar una limpieza dental para la proxima semana",
+    "expected_intent": "purchase_intent",
+    "requires_payment_hint": false,
+    "requires_contact_hint": false
+  },
+  {
+    "id": "dentist-urgent",
+    "name": "Urgencia dental",
+    "prompt": "Tengo dolor de muela fuerte, me pueden orientar por favor?",
+    "expected_intent": "inquiry",
+    "requires_payment_hint": false,
+    "requires_contact_hint": false
+  },
+  {
+    "id": "cabin-quote",
+    "name": "Cotizacion cabañas",
+    "prompt": "Quiero cotizar una cabaña para 2 noches para 3 personas",
+    "expected_intent": "purchase_intent",
+    "requires_payment_hint": false,
+    "requires_contact_hint": false
+  },
+  {
+    "id": "cabin-availability",
+    "name": "Disponibilidad hospedaje",
+    "prompt": "Tienen disponibilidad para check-in el viernes y check-out el domingo?",
+    "expected_intent": "purchase_intent",
+    "requires_payment_hint": false,
+    "requires_contact_hint": false
+  },
+  {
+    "id": "support-incident",
+    "name": "Incidente soporte",
+    "prompt": "Necesito soporte urgente, el sistema no funciona y arroja error",
+    "expected_intent": "complaint",
+    "requires_payment_hint": false,
+    "requires_contact_hint": true
+  },
+  {
+    "id": "support-follow-up",
+    "name": "Seguimiento soporte",
+    "prompt": "Aun tengo el mismo problema tecnico, me ayuda un asesor?",
+    "expected_intent": "complaint",
+    "requires_payment_hint": false,
+    "requires_contact_hint": true
+  },
+  {
+    "id": "custom-charge-request",
+    "name": "Cobro personalizado",
+    "prompt": "Necesito pagar un adicional con monto personalizado",
+    "expected_intent": "purchase_intent",
+    "requires_payment_hint": true,
+    "requires_contact_hint": false
+  },
+  {
+    "id": "bank-transfer-request",
+    "name": "Datos de transferencia",
+    "prompt": "Me compartes los datos bancarios para transferir ahora?",
+    "expected_intent": "purchase_intent",
+    "requires_payment_hint": true,
+    "requires_contact_hint": false
+  }
+]

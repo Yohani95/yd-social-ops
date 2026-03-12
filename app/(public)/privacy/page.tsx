@@ -138,9 +138,9 @@ export default function PrivacyPage() {
                                 clientes.
                             </li>
                             <li>
-                                <strong>Proveedores de IA (OpenAI/Google):</strong> para generar
+                                <strong>Proveedores de IA (Groq, OpenAI, Google):</strong> para generar
                                 respuestas del bot. Los mensajes se envían sin información
-                                personal identificable del tenant.
+                                personal identificable del tenant. Proveedor primario: Groq.
                             </li>
                         </ul>
                     </div>

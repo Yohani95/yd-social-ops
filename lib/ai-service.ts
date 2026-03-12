@@ -14,6 +14,9 @@ type IndustryTemplate =
   | "retail_store"
   | "professional_services"
   | "delivery_restaurant"
+  | "dental_clinic"
+  | "lodging_cabins"
+  | "technical_support"
   | "spa_wellness"
   | "veterinary"
   | "general";
@@ -104,6 +107,18 @@ function detectIndustryTemplate(tenant: Tenant, products: Product[]): IndustryTe
     .join(" ")
     .toLowerCase();
 
+  if (/\b(dentista|odontolog|ortodon|brackets|implante|caries|endodoncia|periodoncia|limpieza dental)\b/i.test(combined)) {
+    return "dental_clinic";
+  }
+
+  if (/\b(cabana|caba\u00f1a|cabanas|caba\u00f1as|hostal|hotel|hospedaje|alojamiento|check[\s-]?in|check[\s-]?out|noche)\b/i.test(combined)) {
+    return "lodging_cabins";
+  }
+
+  if (/\b(soporte|mesa de ayuda|help ?desk|ticket|incidencia|asistencia tecnica|asistencia t[e\u00e9]cnica|falla tecnica|falla t[e\u00e9]cnica|mantenimiento)\b/i.test(combined)) {
+    return "technical_support";
+  }
+
   if (/\b(veterin|mascota|perro|gato|emergencia veterin)\b/i.test(combined)) {
     return "veterinary";
   }
@@ -132,13 +147,28 @@ function buildIndustryTemplateInstructions(template: IndustryTemplate): string {
     case "professional_services":
       return `PLANTILLA DE INDUSTRIA: SERVICIO PROFESIONAL
 - No trates los servicios como stock fisico.
-- Enfoca la conversacion en tipo de consulta, modalidad y agenda.
-- Invita a agendar por el canal de contacto configurado cuando haya intencion clara.`;
+- Enfoca la conversacion en tipo de consulta, modalidad y resultado esperado.
+- Invita a concretar por el canal de contacto configurado cuando haya intencion clara.`;
     case "delivery_restaurant":
       return `PLANTILLA DE INDUSTRIA: DELIVERY / RESTAURANTE
 - Presenta opciones por categoria o combos cuando aplique.
 - Si preguntan por pedido, solicita direccion/zona y preferencia principal.
 - Mantiene respuestas breves y orientadas a cierre de pedido.`;
+    case "dental_clinic":
+      return `PLANTILLA DE INDUSTRIA: CLINICA DENTAL
+- Solicita motivo de consulta, nivel de dolor/molestia y disponibilidad horaria.
+- Si hay urgencia (dolor intenso, sangrado, trauma), deriva de inmediato al canal directo configurado.
+- Para agenda normal, confirma paciente, fecha tentativa y siguiente paso para reservar.`;
+    case "lodging_cabins":
+      return `PLANTILLA DE INDUSTRIA: CABANAS / HOSPEDAJE
+- Antes de cotizar, solicita check-in, check-out, cantidad de personas y preferencia de cabana.
+- Prioriza reglas de disponibilidad y capacidad real; no confirmes reserva sin esos datos.
+- Si falta informacion, pide lo minimo necesario para avanzar a reserva o pago.`;
+    case "technical_support":
+      return `PLANTILLA DE INDUSTRIA: SOPORTE TECNICO
+- Solicita problema exacto, servicio afectado, contexto y cuando comenzo la falla.
+- Pide evidencia minima util (captura, mensaje de error, pasos ya realizados) antes de escalar.
+- Si el impacto es alto o bloqueo total, prioriza derivacion inmediata por el canal de soporte definido.`;
     case "spa_wellness":
       return `PLANTILLA DE INDUSTRIA: SPA / WELLNESS
 - Prioriza duracion, profesional/servicio y horario tentativo.
@@ -193,14 +223,14 @@ function buildSystemPrompt(
 
   const roleLabel: Record<string, string> = {
     products: "asistente de ventas virtual",
-    services: "asistente de reservas y servicios",
+    services: "asistente de servicios",
     professional: "asistente virtual de atencion",
     mixed: "asistente virtual",
   };
 
   const goalLabel: Record<string, string> = {
     products: "ayudar a los clientes con sus consultas y facilitar sus compras",
-    services: "ayudar a los clientes a conocer los servicios disponibles y facilitar sus reservas",
+    services: "ayudar a los clientes a conocer los servicios disponibles y facilitar su contratacion",
     professional: "atender consultas de potenciales clientes y orientarlos sobre los servicios profesionales disponibles",
     mixed: "ayudar a los clientes con productos, servicios y consultas",
   };
@@ -208,7 +238,7 @@ function buildSystemPrompt(
   const catalog = buildCatalogSection(products, businessType);
   const industryInstructions = buildIndustryTemplateInstructions(industryTemplate);
   const toneInstructions = buildToneInstructions(tenant.bot_tone || "amigable");
-  const contactInstructions = buildContactInstructions(tenant);
+  const contactInstructions = buildContactInstructions(tenant, products);
   const mcpInstructions = buildMcpInstructions(mcpServers);
   const behaviorInstructions = `
 CONTEXTO Y AMBIGUEDAD:
@@ -235,7 +265,8 @@ ${toneInstructions}
 INSTRUCCIONES GENERALES:
 - Responde siempre en espanol.
 - Busca en el catalogo y proporciona informacion precisa.
-- Si un item tiene stock y este es 0, informa que no esta disponible.
+- Si es producto con stock 0, informa que no esta disponible.
+- Si es servicio o delivery, confirma disponibilidad segun agenda/cupos/zona antes de cerrar la venta.
 - Manten las respuestas concisas (maximo 3 parrafos).
 - NUNCA inventes productos o servicios. Solo menciona los que estan en el catalogo. Si el cliente pregunta por algo que no ofreces, responde amablemente que no lo tienes.
 - NUNCA incluyas IDs, UUIDs ni el "MAPEO PARA generate_payment_link" en tus respuestas al cliente. El cliente solo debe ver nombres de productos y precios.
@@ -269,24 +300,60 @@ function buildCatalogSection(products: Product[], businessType: string): string 
   };
 
   const lines = products.map((p) => {
-    const typeTag = p.item_type === "service" ? "[Servicio]" : p.item_type === "info" ? "[Info]" : "[Producto]";
+    const typeTag =
+      p.item_type === "service"
+        ? "[Servicio]"
+        : p.item_type === "info"
+          ? "[Info]"
+          : p.item_type === "delivery"
+            ? "[Delivery]"
+            : "[Producto]";
     const priceStr = p.item_type !== "info" && Number(p.price) > 0
       ? ` | Precio: $${Number(p.price).toLocaleString("es-CL")}`
       : "";
 
     const unitLabel = p.unit_label?.trim() || "unidad";
+    const attributes =
+      p.attributes && typeof p.attributes === "object" && !Array.isArray(p.attributes)
+        ? (p.attributes as Record<string, unknown>)
+        : {};
+    const deliveryZones = Array.isArray(attributes.delivery_zones)
+      ? (attributes.delivery_zones as unknown[])
+          .map((zone) => String(zone).trim())
+          .filter(Boolean)
+          .slice(0, 3)
+      : [];
+    const etaMin = Number(attributes.eta_min_minutes || 0);
+    const etaMax = Number(attributes.eta_max_minutes || 0);
+    const etaStr =
+      Number.isFinite(etaMin) && Number.isFinite(etaMax) && etaMin > 0 && etaMax >= etaMin
+        ? ` | Entrega estimada: ${etaMin}-${etaMax} min`
+        : Number.isFinite(etaMin) && etaMin > 0
+          ? ` | Entrega estimada: ${etaMin} min`
+          : "";
+    const zonesStr = deliveryZones.length > 0 ? ` | Zonas: ${deliveryZones.join(", ")}` : "";
+
     const stockStr = p.item_type === "product"
       ? ` | Stock: ${p.stock} ${unitLabel}${p.stock === 1 ? "" : "es"}`
       : p.item_type === "service"
-        ? businessType === "services" || businessType === "professional"
-          ? " | Requiere verificacion de agenda/fechas"
-          : p.stock > 0
-            ? ` | Disponibilidad: ${p.stock} ${unitLabel}${p.stock === 1 ? "" : "es"}`
-            : " | Sin disponibilidad por ahora"
+        ? p.availability_type === "calendar"
+          ? " | Disponibilidad por agenda"
+          : p.availability_type === "quota"
+            ? p.stock > 0
+              ? ` | Cupos: ${p.stock} ${unitLabel}${p.stock === 1 ? "" : "es"}`
+              : " | Cupos sujetos a confirmacion"
+            : p.stock > 0
+              ? ` | Disponibilidad: ${p.stock} ${unitLabel}${p.stock === 1 ? "" : "es"}`
+              : ""
+        : p.item_type === "delivery"
+          ? p.stock > 0
+            ? ` | Capacidad: ${p.stock} pedidos`
+            : " | Capacidad sujeta a confirmacion"
         : "";
 
     const descStr = p.description ? ` | ${p.description}` : "";
-    return `- ${typeTag} ${p.name}${priceStr}${stockStr}${descStr}`;
+    const deliveryExtra = p.item_type === "delivery" ? `${zonesStr}${etaStr}` : "";
+    return `- ${typeTag} ${p.name}${priceStr}${stockStr}${deliveryExtra}${descStr}`;
   });
 
   const catalogText = `${headerLabel[businessType] || headerLabel.mixed}:\n${lines.join("\n")}`;
@@ -308,40 +375,65 @@ function buildToneInstructions(tone: string): string {
   }
 }
 
-function buildContactInstructions(tenant: Tenant): string {
+function hasCalendarBasedServices(products: Product[]): boolean {
+  return products.some((p) => p.item_type === "service" && p.availability_type === "calendar");
+}
+
+function hasDeliveryItems(products: Product[]): boolean {
+  return products.some((p) => p.item_type === "delivery");
+}
+
+function buildContactInstructions(tenant: Tenant, products: Product[]): string {
   const contactAction = tenant.contact_action || "payment_link";
   const checkoutMode = tenant.merchant_checkout_mode || "bank_transfer";
-  const isServicesBusiness = tenant.business_type === "services";
-  const servicesRules = isServicesBusiness
+  const hasCalendarServices = hasCalendarBasedServices(products);
+  const hasDelivery = hasDeliveryItems(products);
+  const closeActionLabel = hasCalendarServices || hasDelivery
+    ? "COMPRAR/RESERVAR/PEDIR/CONTRATAR"
+    : "COMPRAR/CONTRATAR";
+  const servicesRules = hasCalendarServices
     ? `
 
 REGLAS PARA RESERVAS (SERVICIOS):
-- Antes de confirmar precio o disponibilidad, solicita los datos necesarios (fecha, horario, cantidad de personas u otros segun el servicio).
-- Si el cliente dice "quiero reservar", pregunta lo que falte para poder ayudarle.`
+- Solo solicita fecha y hora cuando el cliente quiera reservar o el servicio realmente requiera agenda.
+- Si la consulta es general, responde precio/alcance primero y luego pide datos de reserva cuando corresponda.`
+    : `
+
+SERVICIOS DIGITALES / SaaS:
+- No pidas fecha ni horario si el servicio no requiere agenda.
+- Si el cliente quiere contratar, avanza directo a pago o activacion en esta misma conversacion.`
+  const deliveryRules = hasDelivery
+    ? `
+
+REGLAS PARA DELIVERY:
+- Antes de cerrar un pedido, confirma zona/direccion y franja horaria estimada.
+- Si la zona no esta cubierta, ofrece retiro o alternativa disponible.
+- Si hay costo de despacho en catalogo/atributos, informalo antes del pago.`
     : "";
+  const fulfillmentRules = `${servicesRules}${deliveryRules}`;
 
   switch (contactAction) {
     case "whatsapp_contact": {
       const wa = tenant.contact_whatsapp || "";
       const waClean = wa.replace(/[^0-9]/g, "");
-      return `CUANDO EL CLIENTE QUIERA COMPRAR/RESERVAR/CONTRATAR:
+      return `CUANDO EL CLIENTE QUIERA ${closeActionLabel}:
 - Proporciona toda la informacion relevante del catalogo.
 - Indica al cliente que para concretar, puede contactar directamente por WhatsApp: https://wa.me/${waClean}
-- NO generes links de pago ni menciones sistemas de pago automaticos.${servicesRules}`;
+- NO generes links de pago ni menciones sistemas de pago automaticos.${fulfillmentRules}`;
     }
     case "email_contact": {
       const email = tenant.contact_email || "";
-      return `CUANDO EL CLIENTE QUIERA COMPRAR/RESERVAR/CONTRATAR:
+      return `CUANDO EL CLIENTE QUIERA ${closeActionLabel}:
 - Proporciona toda la informacion relevante del catalogo.
 - Indica al cliente que para concretar, puede escribir a: ${email}
-- NO generes links de pago ni menciones sistemas de pago automaticos.${servicesRules}`;
+- NO generes links de pago ni menciones sistemas de pago automaticos.${fulfillmentRules}`;
     }
     case "custom_message": {
       const msg = tenant.contact_custom_message || "Contacta directamente al negocio para mas informacion.";
-      return `CUANDO EL CLIENTE QUIERA COMPRAR/RESERVAR/CONTRATAR:
+      return `CUANDO EL CLIENTE QUIERA ${closeActionLabel}:
 - Proporciona toda la informacion relevante del catalogo.
 - Responde con este mensaje de contacto: ${msg}
-- NO generes links de pago ni menciones sistemas de pago automaticos.${servicesRules}`;
+- NO generes links de pago ni menciones sistemas de pago automaticos.${fulfillmentRules}`;
     }
     case "payment_link":
     default: {
@@ -358,19 +450,19 @@ REGLAS PARA RESERVAS (SERVICIOS):
 
         // Modo dual: MP OAuth + datos bancarios configurados
         if (hasBankDetails && bankDetailsText) {
-          if (isServicesBusiness) {
+          if (hasCalendarServices) {
             return `METODO DE PAGO (DOS OPCIONES DISPONIBLES):
 El cliente puede elegir como pagar. Presenta ambas opciones y pregunta cual prefiere.
 
 REGLAS PARA RESERVAS (SERVICIOS):
-- Antes de mencionar precios o generar pagos, recopila los datos necesarios (fecha, horario, cantidad de personas u otros segun el servicio).
-- Solo cuando tengas todos los datos de la reserva, ofrece las opciones de pago.
+- Si el cliente solo consulta, entrega informacion general y precio de referencia sin bloquear la conversacion.
+- Cuando el cliente confirme reserva, recopila los datos necesarios (fecha, horario, cantidad de personas u otros segun el servicio) y luego ofrece opciones de pago.
 
-OPCION 1 — Link de pago personalizado (recomendado para el monto acordado):
+OPCION 1 - Link de pago personalizado (recomendado para el monto acordado):
 - Usa "generate_custom_payment_link" con el monto exacto de la reserva confirmada.
 - NO uses generate_payment_link para servicios (los precios dependen de fechas/disponibilidad).
 
-OPCION 2 — Transferencia bancaria:
+OPCION 2 - Transferencia bancaria:
 ${bankDetailsText}
 - El cliente envia el comprobante por este mismo chat.
 
@@ -382,7 +474,7 @@ Si elige link, genera el link con generate_custom_payment_link para el monto aco
           return `METODO DE PAGO (DOS OPCIONES DISPONIBLES):
 El cliente puede elegir como pagar. Cuando quiera comprar, presenta ambas opciones:
 
-OPCION 1 — Link de pago automatico (recomendado):
+OPCION 1 - Link de pago automatico (recomendado):
 1. Confirma que producto quiere y la cantidad.
 2. Verifica stock/disponibilidad.
 3. Llama a "generate_payment_link" con el product_id correspondiente.
@@ -390,7 +482,7 @@ OPCION 1 — Link de pago automatico (recomendado):
 - Si el cliente pide un cobro personalizado, usa "generate_custom_payment_link".
 - Modo ad-hoc: ${adHocMode}.
 
-OPCION 2 — Transferencia bancaria:
+OPCION 2 - Transferencia bancaria:
 ${bankDetailsText}
 - El cliente envia el comprobante por este mismo chat.
 
@@ -402,11 +494,11 @@ DESPUES DE GENERAR UN LINK:
         }
 
         // Solo MP OAuth (sin datos bancarios)
-        if (isServicesBusiness) {
+        if (hasCalendarServices) {
           return `METODO DE PAGO (LINK PERSONALIZADO PARA SERVICIOS):
 REGLAS PARA RESERVAS (SERVICIOS):
-- Antes de generar un pago, recopila los datos necesarios (fecha, horario, cantidad de personas u otros segun el servicio).
-- Solo cuando tengas todos los datos confirmados, usa "generate_custom_payment_link" con el monto exacto acordado.
+- Si el cliente solo consulta, entrega informacion general y precio de referencia.
+- Cuando el cliente confirme reserva, recopila los datos necesarios y usa "generate_custom_payment_link" con el monto exacto acordado.
 - NO uses generate_payment_link directo para servicios.
 - Modo ad-hoc: ${adHocMode}.
 
@@ -432,7 +524,7 @@ DESPUES DE GENERAR UN LINK DE PAGO:
 - Si el estado es "pending_approval", informa que la solicitud fue recibida y esta en revision por el negocio.
 - Si hubo un error, disculpate y sugiere alternativas como intentar de nuevo o contactar directamente.
 - NUNCA inventes URLs de pago. Solo comparte las que el sistema te proporciona.
-- NUNCA repitas informacion tecnica como IDs, estados internos o nombres de funciones.${servicesRules}`;
+- NUNCA repitas informacion tecnica como IDs, estados internos o nombres de funciones.${fulfillmentRules}`;
       }
 
       if (checkoutMode === "external_link" && tenant.merchant_external_checkout_url?.trim()) {
@@ -445,7 +537,7 @@ Cuando un cliente quiera comprar:
 - NO generes links nuevos ni inventes URLs.
 - Si no hay stock/disponibilidad, informa y ofrece alternativas.
 - Si el cliente pide un cobro extra/reserva con monto personalizado (fuera del catalogo), usa "generate_custom_payment_link".
-- Modo ad-hoc actual del tenant: ${adHocMode}.${servicesRules}`;
+- Modo ad-hoc actual del tenant: ${adHocMode}.${fulfillmentRules}`;
       }
 
       const bankDetails =
@@ -453,13 +545,13 @@ Cuando un cliente quiera comprar:
         "Datos bancarios no configurados. Indica al cliente que contacte directamente al negocio para concretar el pago.";
       const adHocMode = tenant.merchant_ad_hoc_link_mode || "approval";
 
-      if (isServicesBusiness) {
-        return `METODO DE PAGO (TRANSFERENCIA BANCARIA — SERVICIOS):
+      if (hasCalendarServices) {
+        return `METODO DE PAGO (TRANSFERENCIA BANCARIA - SERVICIOS):
 Los links de pago automaticos de catalogo NO estan disponibles.
 
 REGLAS PARA RESERVAS (SERVICIOS):
-- Antes de dar datos de pago, recopila los datos necesarios (fecha, horario, cantidad de personas u otros segun el servicio).
-- Solo cuando el cliente confirme que quiere reservar y tengas todos los datos, comparte los datos de transferencia.
+- Si el cliente solo consulta, entrega informacion general y precio de referencia.
+- Cuando el cliente confirme reserva y tengas los datos necesarios (fecha, horario, cantidad de personas u otros segun el servicio), comparte los datos de transferencia.
 - Si el monto es variable o personalizado, usa "generate_custom_payment_link" con el monto acordado.
 
 DATOS DE TRANSFERENCIA (incluir completos cuando el cliente confirme la reserva):
@@ -565,6 +657,64 @@ const captureContactDataTool: AITool = {
   },
 };
 
+const checkOrderStatusTool: AITool = {
+  name: "check_order_status",
+  description: "Consulta el estado de un pedido cuando el cliente pregunta por su compra, envio o numero de orden.",
+  parameters: {
+    type: "object",
+    properties: {
+      order_id: {
+        type: "string",
+        description: "Numero de orden o ID del pedido si el cliente lo menciono",
+      },
+      customer_email: {
+        type: "string",
+        description: "Email del cliente si lo proporcionó, para buscar su pedido mas reciente",
+      },
+    },
+  },
+};
+
+const checkAvailabilityTool: AITool = {
+  name: "check_availability",
+  description: "Consulta los horarios disponibles para agendar una cita o reunión cuando el cliente quiere reservar un turno.",
+  parameters: {
+    type: "object",
+    properties: {
+      days_ahead: {
+        type: "number",
+        description: "Cuántos días hacia adelante buscar disponibilidad (default 7)",
+      },
+    },
+  },
+};
+
+const bookAppointmentTool: AITool = {
+  name: "book_appointment",
+  description: "Llama esta herramienta cuando el cliente quiera agendar o confirmar un horario. NO pidas email ni nombre — el cliente los ingresará en el link de Calendly. Retorna el link donde el cliente completa la reserva por sí mismo.",
+  parameters: {
+    type: "object",
+    properties: {
+      start_time: { type: "string", description: "Horario ISO 8601 del slot elegido (o el primero disponible si el cliente no especificó)" },
+      note:       { type: "string", description: "Nota o motivo de la cita si el cliente lo indicó" },
+    },
+    required: ["start_time"],
+  },
+};
+
+const cancelAppointmentTool: AITool = {
+  name: "cancel_appointment",
+  description: "Cancela una cita existente cuando el cliente lo solicita y provee su UUID de invitado.",
+  parameters: {
+    type: "object",
+    properties: {
+      invitee_uuid: { type: "string", description: "UUID del invitado en Calendly" },
+      reason:       { type: "string", description: "Motivo de la cancelación si el cliente lo indicó" },
+    },
+    required: ["invitee_uuid"],
+  },
+};
+
 // ============================================================
 // Tool executors
 // ============================================================
@@ -596,9 +746,16 @@ async function executeGeneratePaymentLink(
 
   const requiresStrictStock = product.item_type === "product";
   const hasLimitedServiceCapacity = product.item_type === "service" && product.stock > 0;
-  if ((requiresStrictStock || hasLimitedServiceCapacity) && product.stock < quantity) {
+  const hasLimitedDeliveryCapacity = product.item_type === "delivery" && product.stock > 0;
+  if ((requiresStrictStock || hasLimitedServiceCapacity || hasLimitedDeliveryCapacity) && product.stock < quantity) {
+    const stockLabel =
+      product.item_type === "service"
+        ? "cupos"
+        : product.item_type === "delivery"
+          ? "pedidos"
+          : "unidades";
     return {
-      error: `Solo hay ${product.stock} unidades disponibles de "${product.name}".`,
+      error: `Solo hay ${product.stock} ${stockLabel} disponibles de "${product.name}".`,
     };
   }
 
@@ -607,7 +764,7 @@ async function executeGeneratePaymentLink(
   if (checkoutMode === "external_link") {
     const link = tenant.merchant_external_checkout_url?.trim();
     if (!link) {
-      return { error: "El link externo de pago no está configurado." };
+      return { error: "El link externo de pago no esta configurado." };
     }
     return {
       link,
@@ -617,7 +774,7 @@ async function executeGeneratePaymentLink(
   }
 
   if (checkoutMode !== "mp_oauth") {
-    return { error: "El pago automático no está habilitado para este negocio." };
+    return { error: "El pago automatico no esta habilitado para este negocio." };
   }
 
   if (!tenant.mp_access_token) {
@@ -890,7 +1047,7 @@ async function executeCaptureContactData(params: {
 
       if (tenantData?.business_name) {
         // Ejecutamos en segundo plano para no bloquear al bot
-        sendWelcomeEmail(email, tenantData.business_name).catch((err: any) =>
+        sendWelcomeEmail(email, tenantData.business_name).catch((err: unknown) =>
           console.error("[AI Service] Error sending welcome mail:", err)
         );
       }
@@ -1052,27 +1209,27 @@ function shouldCheckPaidStatus(message: string): boolean {
   const lower = message.toLowerCase();
   const patterns = [
     // Afirmaciones directas de pago
-    /ya\s+pagu[eé]/i,
-    /listo\s+ya\s+lo\s+pagu[eé]/i,
+    /ya\s+pagu[e\u00e9]/i,
+    /listo\s+ya\s+lo\s+pagu[e\u00e9]/i,
     /pago\s+realizado/i,
-    /se\s+acredit[oó]/i,
-    /transfer[íi]\s*(ya|listo)/i,
+    /se\s+acredit[o\u00f3]/i,
+    /transfer[\u00edi]\s*(ya|listo)/i,
     /hice\s+la\s+transferencia/i,
-    /ya\s+transfer[íi]/i,
-    /ya\s+realic[eé]\s+el\s+pago/i,
-    // Solicitudes de verificación
-    /puedes\s+comprobar\s+si\s+lo\s+pagu[eé]/i,
+    /ya\s+transfer[\u00edi]/i,
+    /ya\s+realic[e\u00e9]\s+el\s+pago/i,
+    // Solicitudes de verificacion
+    /puedes\s+comprobar\s+si\s+lo\s+pagu[e\u00e9]/i,
     /verifica(r)?\s+mi\s+pago/i,
     /rev(isa|isar)\s+mi\s+pago/i,
-    /compruebas?\s+(el\s+pago|mi\s+pago|si\s+pagu[eé])/i,
+    /compruebas?\s+(el\s+pago|mi\s+pago|si\s+pagu[e\u00e9])/i,
     // Preguntas de seguimiento (fix: evita hallucination)
-    /recibiste\s+(la\s+confirmaci[oó]n|el\s+pago|mi\s+pago)/i,
-    /lleg[oó]\s+(el\s+pago|mi\s+pago|la\s+confirmaci[oó]n)/i,
-    /se\s+proces[oó]\s+mi\s+pago/i,
-    /se\s+confirm[oó]\s+el\s+pago/i,
+    /recibiste\s+(la\s+confirmaci[o\u00f3]n|el\s+pago|mi\s+pago)/i,
+    /lleg[o\u00f3]\s+(el\s+pago|mi\s+pago|la\s+confirmaci[o\u00f3]n)/i,
+    /se\s+proces[o\u00f3]\s+mi\s+pago/i,
+    /se\s+confirm[o\u00f3]\s+el\s+pago/i,
     /ya\s+aparece\s+(el\s+pago|mi\s+compra)/i,
-    /puedo\s+ver\s+(mi\s+pago|la\s+confirmaci[oó]n)/i,
-    /qued[oó]\s+(registrado|confirmado)\s+el\s+pago/i,
+    /puedo\s+ver\s+(mi\s+pago|la\s+confirmaci[o\u00f3]n)/i,
+    /qued[o\u00f3]\s+(registrado|confirmado)\s+el\s+pago/i,
   ];
   return patterns.some((pattern) => pattern.test(lower));
 }
@@ -1113,6 +1270,65 @@ function formatApprovedAmount(amount: number, currency: string): string {
     return `$${Math.round(amount).toLocaleString("es-CL")} CLP`;
   }
   return `${amount.toLocaleString("es-CL")} ${normalizedCurrency}`;
+}
+
+function normalizeIntentText(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function getLastAssistantMessage(chatHistory: AIMessage[]): string {
+  for (let i = chatHistory.length - 1; i >= 0; i--) {
+    const msg = chatHistory[i];
+    if (msg.role === "assistant") return msg.content || "";
+  }
+  return "";
+}
+
+function shouldEnablePaymentToolsForMessage(
+  message: string,
+  chatHistory: AIMessage[]
+): { enableCatalogTool: boolean; enableCustomTool: boolean } {
+  const normalized = normalizeIntentText(message);
+  const hasDirectPaymentIntent =
+    /\b(comprar|pagar|pago|precio|costo|cuanto|valor|cotiz|presupuesto|reservar|reserva|agendar|contratar|checkout|link de pago|transferencia|transferir|pedido|pedir|delivery|despacho|envio|domicilio)\b/.test(
+      normalized
+    );
+  const asksCustomAmount =
+    /\b(personalizad|monto|sena|anticipo|abono|adicional|extra|manual|fuera del catalogo)\b/.test(
+      normalized
+    );
+  const shortAffirmative = /^(si|sii+|ok|oka+y?|dale|perfecto|de acuerdo|hazlo|enviamelo|envialo|listo)$/.test(
+    normalized
+  );
+
+  const lastAssistant = normalizeIntentText(getLastAssistantMessage(chatHistory));
+  const lastAssistantInCheckoutContext =
+    /\b(link de pago|pagar|compra|comprar|cantidad|producto|servicio|reserva|monto|transferencia|pedido|delivery|despacho|domicilio)\b/.test(
+      lastAssistant
+    );
+
+  const inferredPaymentIntent = shortAffirmative && lastAssistantInCheckoutContext;
+  const enableCatalogTool = hasDirectPaymentIntent || inferredPaymentIntent;
+  const enableCustomTool = asksCustomAmount || enableCatalogTool;
+
+  return { enableCatalogTool, enableCustomTool };
+}
+
+function shouldEnableContactCaptureToolForMessage(message: string): boolean {
+  const normalized = normalizeIntentText(message);
+  const hasEmail = /[^\s@]+@[^\s@]+\.[^\s@]+/.test(message);
+  const hasPhone = /\+?\d[\d\s().-]{7,}\d/.test(message);
+  const hasUsername = /(^|\s)@[a-z0-9._]{3,}/i.test(message);
+  const hasContactCue =
+    /\b(mi nombre es|me llamo|soy|mi correo|mi email|mi mail|mi telefono|mi numero|mi whatsapp|tengo \d{1,3} anos|edad)\b/.test(
+      normalized
+    );
+
+  return hasEmail || hasPhone || hasUsername || hasContactCue;
 }
 
 async function findRecentApprovedPaymentForConversation(params: {
@@ -1245,7 +1461,7 @@ export async function processMessage(
       };
     }
 
-    // Pago aún no confirmado: respuesta determinista para evitar que la IA invente
+    // Pago aun no confirmado: respuesta determinista para evitar que la IA invente
     const pendingMessage =
       "Aun no tenemos confirmacion de tu pago en el sistema. Los pagos pueden tardar algunos minutos en procesarse. Si ya realizaste la transferencia, espera unos minutos e intentalo nuevamente. Si el problema persiste, contacta directamente al negocio.";
 
@@ -1276,7 +1492,7 @@ export async function processMessage(
     };
   }
 
-  // Fase 4: RAG — enriquece el system prompt si el feature flag está activo
+  // Fase 4: RAG - enriquece el system prompt si el feature flag esta activo
   let ragContext = "";
   const ragEnabled = await isFeatureEnabled(tenant_id, "rag_enabled");
   if (ragEnabled) {
@@ -1288,16 +1504,41 @@ export async function processMessage(
     );
   }
 
-  const systemPrompt = buildSystemPrompt(tenant, products, mcpServers) + ragContext;
+  const schedulingEnabled = await isFeatureEnabled(tenant_id, "scheduling_enabled");
+  const ecommerceEnabled  = await isFeatureEnabled(tenant_id, "ecommerce_enabled");
+
+  // Contexto de módulos activos: el bot necesita saber qué puede hacer
+  let modulesContext = "";
+  if (schedulingEnabled) {
+    modulesContext += `
+
+CAPACIDAD DE AGENDAMIENTO:
+Puedes consultar disponibilidad y agendar citas para los clientes usando tus herramientas.
+- Si el cliente quiere saber cuándo pueden hablar, reunirse, coordinar, o agendar cualquier tipo de cita: ofrece verificar disponibilidad.
+- No esperes palabras exactas. Cualquier intención de coordinar un encuentro activa esta capacidad.
+- SIEMPRE usa check_availability antes de mostrar horarios. NUNCA inventes fechas u horas.
+- NO pidas email ni nombre antes de agendar — el cliente los ingresa en el link de Calendly.
+- Cuando el cliente elija (o acepte) un horario, llama book_appointment y comparte el link resultante.
+- Aclara que el cliente debe abrir el link para confirmar la reserva.`;
+  }
+  if (ecommerceEnabled) {
+    modulesContext += `
+
+CAPACIDAD DE SEGUIMIENTO DE PEDIDOS:
+Si el cliente pregunta por el estado de un pedido, envío o compra online, usa check_order_status.`;
+  }
+
+  const systemPrompt = buildSystemPrompt(tenant, products, mcpServers) + ragContext + modulesContext;
   const useCatalogPaymentTool =
     (tenant.contact_action || "payment_link") === "payment_link" &&
     tenant.merchant_checkout_mode === "mp_oauth" &&
     tenant.plan_tier !== "basic" &&
     !!tenant.mp_access_token;
   const useCustomPaymentTool = (tenant.contact_action || "payment_link") === "payment_link";
+  const primaryAIProvider = (process.env.AI_PROVIDER || "groq").toLowerCase();
 
   const historyLimit = parseInt(
-    process.env.AI_CHAT_HISTORY_LIMIT || "10",
+    process.env.AI_CHAT_HISTORY_LIMIT || (primaryAIProvider === "groq" ? "8" : "10"),
     10
   );
   const historyLimitSafe = Math.min(Math.max(historyLimit, 1), 20);
@@ -1317,14 +1558,46 @@ export async function processMessage(
     { role: "user", content: sanitizedUserMessage },
   ];
 
+  const forceAllTools = process.env.AI_FORCE_ALL_TOOLS === "true";
+  const paymentToolPlan = shouldEnablePaymentToolsForMessage(sanitizedUserMessage, chatHistory);
+  const enableCatalogPaymentTool =
+    useCatalogPaymentTool && (forceAllTools || paymentToolPlan.enableCatalogTool);
+  const enableCustomPaymentTool =
+    useCustomPaymentTool && (forceAllTools || paymentToolPlan.enableCustomTool);
+  const enableCaptureContactTool =
+    !!(request.user_identifier || request.session_id) &&
+    (forceAllTools || shouldEnableContactCaptureToolForMessage(sanitizedUserMessage));
+
+  // ecommerceEnabled y schedulingEnabled ya fueron declarados arriba (antes de buildSystemPrompt)
+  const enableOrderStatusTool =
+    ecommerceEnabled &&
+    (forceAllTools || /pedido|orden|compra|envio|despacho|estado|order|track/i.test(sanitizedUserMessage));
+
+  // Scheduling: siempre incluir tools cuando el módulo está activo
+  // (el bot ya sabe que puede agendar gracias al system prompt; no tiene sentido gatear por keywords)
+  const enableSchedulingTools = schedulingEnabled;
+  const enableCancelAppointmentTool = schedulingEnabled;
+
   const tools: AITool[] = [];
-  if (useCatalogPaymentTool) {
+  if (enableCatalogPaymentTool) {
     tools.push(generatePaymentLinkTool);
   }
-  if (useCustomPaymentTool) {
+  if (enableCustomPaymentTool) {
     tools.push(generateCustomPaymentLinkTool);
   }
-  if (request.user_identifier || request.session_id) tools.push(captureContactDataTool);
+  if (enableCaptureContactTool) {
+    tools.push(captureContactDataTool);
+  }
+  if (enableOrderStatusTool) {
+    tools.push(checkOrderStatusTool);
+  }
+  if (enableSchedulingTools) {
+    tools.push(checkAvailabilityTool);
+    tools.push(bookAppointmentTool);
+  }
+  if (enableCancelAppointmentTool) {
+    tools.push(cancelAppointmentTool);
+  }
 
   let aiResponse = await callAI(messages, tools.length > 0 ? tools : undefined);
 
@@ -1438,13 +1711,148 @@ export async function processMessage(
           aiResponse.modelUsed
         );
       }
+
+      if (toolCall.name === "check_order_status") {
+        const args = toolCall.arguments as { order_id?: string; customer_email?: string };
+        let orderResultContent: string;
+        try {
+          const { getEcommerceAdapter } = await import("@/lib/ecommerce");
+          const adapter = await getEcommerceAdapter(tenant_id);
+          if (!adapter) {
+            orderResultContent = "No hay integración ecommerce configurada para este negocio.";
+          } else {
+            const order = await adapter.getOrder({
+              orderId: args.order_id,
+              customerEmail: args.customer_email,
+            });
+            if (!order) {
+              orderResultContent = "No se encontró el pedido con los datos proporcionados.";
+            } else {
+              const items = order.lineItems.map((li) => `${li.quantity}x ${li.name}`).join(", ");
+              orderResultContent = `Pedido #${order.externalId}: estado "${order.status}", total ${order.total} ${order.currency}. Productos: ${items}. Fecha: ${order.createdAt}.`;
+            }
+          }
+        } catch (err) {
+          console.error("[ai-service] check_order_status error:", err);
+          orderResultContent = "Error al consultar el estado del pedido.";
+        }
+
+        aiResponse = await callAIWithToolResult(
+          messages,
+          aiResponse.provider,
+          toolCall.id,
+          toolCall.name,
+          orderResultContent,
+          undefined,
+          aiResponse.modelUsed
+        );
+      }
+
+      if (toolCall.name === "check_availability") {
+        const args = toolCall.arguments as { days_ahead?: number };
+        let resultContent: string;
+        try {
+          const { getSchedulingAdapter } = await import("@/lib/scheduling");
+          const adapter = await getSchedulingAdapter(tenant_id);
+          if (!adapter) {
+            resultContent = "No hay integración de agendamiento configurada para este negocio.";
+          } else {
+            const slots = await adapter.getAvailability(args.days_ahead || 7);
+            if (!slots.length) {
+              resultContent = "No hay horarios disponibles en los próximos días o no se pudo consultar el calendario.";
+            } else {
+              const formatted = slots.slice(0, 6).map((s) => {
+                const d = new Date(s.startTime);
+                return d.toLocaleString("es-CL", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+              }).join(" | ");
+              resultContent = `Horarios disponibles (próximos ${args.days_ahead || 7} días): ${formatted}. Total de slots: ${slots.length}. Pregunta al cliente cuál prefiere para proceder con la reserva.`;
+            }
+          }
+        } catch (err) {
+          console.error("[ai-service] check_availability error:", err);
+          resultContent = "Error al consultar disponibilidad.";
+        }
+
+        aiResponse = await callAIWithToolResult(
+          messages, aiResponse.provider, toolCall.id, toolCall.name,
+          resultContent, undefined, aiResponse.modelUsed
+        );
+      }
+
+      if (toolCall.name === "book_appointment") {
+        const args = toolCall.arguments as {
+          start_time: string; name: string; email: string; note?: string;
+        };
+        let resultContent: string;
+        try {
+          const { getSchedulingAdapter } = await import("@/lib/scheduling");
+          const adapter = await getSchedulingAdapter(tenant_id);
+          if (!adapter) {
+            resultContent = "No hay integración de agendamiento configurada.";
+          } else {
+            const booking = await adapter.bookSlot({
+              startTime:  args.start_time,
+              name:       args.name,
+              email:      args.email,
+              customNote: args.note,
+            });
+            if (!booking) {
+              resultContent = "No se pudo generar el enlace de agendamiento. El cliente puede intentar nuevamente.";
+            } else if (booking.joinUrl) {
+              const isWeb = (request.channel || "web") === "web";
+              if (isWeb) {
+                // Canal web: incluir data-embed para que el frontend renderice el widget de Calendly
+                resultContent = `BOOKING_URL:${booking.joinUrl} | Comparte este enlace al cliente para que complete su reserva en Calendly. El horario quedará confirmado cuando el cliente complete el formulario en: ${booking.joinUrl}`;
+              } else {
+                // Canales de mensajería: solo el link
+                resultContent = `Enlace de reserva generado para el ${new Date(booking.startTime).toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" })}. El cliente DEBE abrir este link y completar el formulario para confirmar la cita: ${booking.joinUrl}`;
+              }
+            } else {
+              resultContent = "No se pudo obtener el enlace de agendamiento de Calendly.";
+            }
+          }
+        } catch (err) {
+          console.error("[ai-service] book_appointment error:", err);
+          resultContent = "Error al reservar la cita.";
+        }
+
+        aiResponse = await callAIWithToolResult(
+          messages, aiResponse.provider, toolCall.id, toolCall.name,
+          resultContent, undefined, aiResponse.modelUsed
+        );
+      }
+
+      if (toolCall.name === "cancel_appointment") {
+        const args = toolCall.arguments as { invitee_uuid: string; reason?: string };
+        let resultContent: string;
+        try {
+          const { getSchedulingAdapter } = await import("@/lib/scheduling");
+          const adapter = await getSchedulingAdapter(tenant_id);
+          if (!adapter) {
+            resultContent = "No hay integración de agendamiento configurada.";
+          } else {
+            const ok = await adapter.cancelBooking(args.invitee_uuid, args.reason);
+            resultContent = ok
+              ? "La cita fue cancelada correctamente."
+              : "No se pudo cancelar la cita. Verifica el ID o contáctanos directamente.";
+          }
+        } catch (err) {
+          console.error("[ai-service] cancel_appointment error:", err);
+          resultContent = "Error al cancelar la cita.";
+        }
+
+        aiResponse = await callAIWithToolResult(
+          messages, aiResponse.provider, toolCall.id, toolCall.name,
+          resultContent, undefined, aiResponse.modelUsed
+        );
+      }
     }
   }
 
   const intent = detectIntent(sanitizedUserMessage, paymentLink);
   const finalMessage = sanitizeBotResponse(aiResponse.content || "No pude procesar tu mensaje.");
 
-  // Fase 1: instrumentación de calidad (fire-and-forget, no bloquea latencia)
+  // Fase 1: instrumentacion de calidad (fire-and-forget, no bloquea latencia)
   const prevBotMessages = chatHistory
     .filter((m) => m.role === "assistant")
     .map((m) => (typeof m.content === "string" ? m.content : ""));
@@ -1569,21 +1977,22 @@ function detectIntent(
 ): BotResponse["intent_detected"] {
   if (hasPaymentLink) return "purchase_intent";
 
-  const lower = message.toLowerCase();
+  const normalized = message
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+
   const purchaseKeywords = [
     "comprar",
-    "quiero",
     "precio",
     "costo",
     "cuanto",
-    "cuánto",
     "pagar",
-    "llevar",
     "adquirir",
     "reservar",
     "reserva",
     "cotizar",
-    "cotización",
     "cotizacion",
     "presupuesto",
     "agendar",
@@ -1591,26 +2000,60 @@ function detectIntent(
     "disponible",
     "contratar",
     "sena",
-    "seña",
     "anticipo",
     "transferir",
     "transferencia",
+    "plan",
+    "checkout",
+    "link de pago",
+    "pedido",
+    "delivery",
+    "domicilio",
+    "despacho",
+    "envio",
   ];
-  const greetingKeywords = ["hola", "buenos", "buen dia", "buenas", "saludos"];
-  const complaintKeywords = ["problema", "queja", "mal", "error", "falla", "defecto", "roto", "no hay", "no encuentro", "no veo"];
+  const greetingKeywords = ["hola", "buenos", "buen dia", "buenas", "saludos", "buenas tardes", "buenas noches"];
+  const complaintKeywords = [
+    "problema",
+    "queja",
+    "reclamo",
+    "molesto",
+    "molesta",
+    "enojado",
+    "enojada",
+    "mal",
+    "pesimo",
+    "error",
+    "falla",
+    "defecto",
+    "roto",
+    "no funciona",
+    "no me llego",
+    "no hay",
+    "no encuentro",
+    "no veo",
+  ];
 
-  const hasPurchase = purchaseKeywords.some((k) => lower.includes(k));
-  const hasGreeting = greetingKeywords.some((k) => lower.includes(k));
-  const hasComplaint = complaintKeywords.some((k) => lower.includes(k));
+  const hasPurchase = purchaseKeywords.some((k) => normalized.includes(k));
+  const hasGreeting = greetingKeywords.some((k) => normalized.includes(k));
+  const hasComplaint = complaintKeywords.some((k) => normalized.includes(k));
 
-  // "no veo X disponible" = queja/consulta, no intención de compra
-  const noVeoDisponible = /\bno\s+veo\b|\bno\s+hay\b|\bno\s+encuentro\b/i.test(lower);
+  // "no veo X disponible" = queja/consulta, no intencion de compra
+  const noVeoDisponible = /\bno\s+veo\b|\bno\s+hay\b|\bno\s+encuentro\b/i.test(normalized);
   const hasPurchaseOnly = hasPurchase && !noVeoDisponible;
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const isVeryShort = words.length <= 4;
+  const looksAmbiguous = /^(mm+|mmm+|eh+|ok+|sip?|no se|nose|tal vez|quizas|solo mirando|mirando|nada|ninguno|da igual|no importa|\?+)$/.test(
+    normalized
+  );
+  const hasAmbiguousSignal = /\b(mm+|mmm+|no se|nose|solo mirando|mirando|viendo|nada|ninguno)\b/.test(normalized);
+  const isLowInfo = words.length <= 7;
 
-  // Priority: purchase > complaint > greeting > inquiry
+  // Priority: purchase > complaint > greeting > unknown > inquiry
   if (hasPurchaseOnly) return "purchase_intent";
   if (hasComplaint) return "complaint";
-  if (hasGreeting) return "greeting";
+  if (hasGreeting && isVeryShort) return "greeting";
+  if ((looksAmbiguous || (hasAmbiguousSignal && isLowInfo)) && !hasPurchase && !hasComplaint) return "unknown";
 
   return "inquiry";
 }

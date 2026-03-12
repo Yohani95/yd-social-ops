@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     const supabase = createServiceClient();
     let query = supabase
         .from("contacts")
-        .select("id, name, identifier, email, phone, channel, tags, created_at, last_seen_at, notes, metadata")
+        .select("id, name, identifier, email, phone, channel, tags, created_at, last_seen_at, notes, metadata, lead_stage, lead_value, assigned_tenant_user_id, total_spent, last_interaction_at")
         .eq("tenant_id", auth.tenantId)
         .order("last_seen_at", { ascending: false })
         .limit(limit)

@@ -19,6 +19,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { LandingNav } from "@/components/landing/landing-nav";
+import { FAQSection } from "@/components/landing/faq-section";
 import type { PlanInfo } from "@/types";
 
 const plans: PlanInfo[] = [
@@ -146,27 +148,7 @@ export const metadata = {
 export default function PricingPage() {
   return (
     <div className="min-h-screen bg-background">
-      {/* Navbar */}
-      <nav className="border-b sticky top-0 bg-background/80 backdrop-blur-sm z-10">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <Bot className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <span className="font-bold text-lg">YD Social Ops</span>
-          </Link>
-          <div className="flex items-center gap-2">
-            <Link href="/login">
-              <Button variant="ghost" size="sm">
-                Iniciar sesión
-              </Button>
-            </Link>
-            <Link href="/register">
-              <Button size="sm">Empezar gratis</Button>
-            </Link>
-          </div>
-        </div>
-      </nav>
+      <LandingNav />
 
       {/* Header */}
       <section className="max-w-6xl mx-auto px-4 sm:px-6 pt-16 pb-8 text-center">
@@ -183,8 +165,9 @@ export default function PricingPage() {
       </section>
 
       {/* Plans Grid */}
-      <section className="max-w-6xl mx-auto px-4 sm:px-6 pb-16">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-16">
+        {/* Mobile/tablet: 1-2 cols; Desktop: 3 cols first row + 2 centered second row; XL: 5 cols */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-6 items-stretch">
           {plans.map((plan) => {
             const Icon = planIcons[plan.id];
             const subscribePath = `/subscribe?plan=${plan.id}`;
@@ -192,40 +175,39 @@ export default function PricingPage() {
             return (
               <Card
                 key={plan.id}
-                className={`flex flex-col ${plan.highlighted
-                  ? "border-primary shadow-lg shadow-primary/10 relative"
-                  : ""
-                  }`}
+                className={`flex flex-col relative ${
+                  plan.highlighted
+                    ? "border-primary shadow-lg shadow-primary/10"
+                    : ""
+                }`}
               >
-                {plan.highlighted && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <Badge className="px-4 py-1">
+                {plan.badge && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
+                    <Badge
+                      className="px-4 py-1 whitespace-nowrap"
+                      variant={plan.highlighted ? "default" : "secondary"}
+                    >
                       {plan.badge}
                     </Badge>
                   </div>
                 )}
 
-                {!plan.highlighted && plan.badge && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <Badge variant="secondary" className="px-4 py-1">
-                      {plan.badge}
-                    </Badge>
-                  </div>
-                )}
-
-                <CardHeader className="pb-4">
+                <CardHeader className="pb-4 pt-6">
                   <div className="flex items-center gap-2 mb-2">
                     <div
-                      className={`w-9 h-9 rounded-lg flex items-center justify-center ${plan.highlighted
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted"
-                        }`}
+                      className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                        plan.highlighted
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted"
+                      }`}
                     >
                       <Icon className="w-5 h-5" />
                     </div>
                     <CardTitle className="text-xl">{plan.name}</CardTitle>
                   </div>
-                  <CardDescription>{plan.description}</CardDescription>
+                  <CardDescription className="text-xs leading-snug">
+                    {plan.description}
+                  </CardDescription>
                   <div className="mt-4">
                     <span className="text-3xl font-bold">
                       {formatCLP(plan.price)}
@@ -267,7 +249,7 @@ export default function PricingPage() {
                       variant={plan.highlighted ? "default" : "outline"}
                       size="lg"
                     >
-                      Suscribirse al Plan {plan.name}
+                      Suscribirse
                       <ArrowRight className="w-4 h-4" />
                     </Button>
                   </Link>
@@ -276,39 +258,15 @@ export default function PricingPage() {
             );
           })}
         </div>
+
+        {/* Note below grid for lg screens (3-col) */}
+        <p className="text-center text-xs text-muted-foreground mt-6">
+          Todos los precios en CLP e incluyen IVA. Facturación mensual.
+        </p>
       </section>
 
       {/* FAQ */}
-      <section className="max-w-3xl mx-auto px-4 sm:px-6 py-16 border-t">
-        <h2 className="text-2xl font-bold text-center mb-8">
-          Preguntas frecuentes
-        </h2>
-        <div className="space-y-6">
-          {[
-            {
-              q: "¿Cómo funciona el período de prueba?",
-              a: "Tienes 14 días gratis al crear tu cuenta. No necesitas tarjeta de crédito. Al terminar el período, puedes suscribirte al plan que prefieras.",
-            },
-            {
-              q: "¿El dinero de las ventas llega directo a mi cuenta?",
-              a: "Sí. Los pagos de tus clientes llegan directo a tu cuenta de Mercado Pago. Nosotros no intermediamos los fondos.",
-            },
-            {
-              q: "¿Puedo cambiar de plan cuando quiera?",
-              a: "Por supuesto. Puedes hacer upgrade o downgrade en cualquier momento desde tu panel de configuración.",
-            },
-            {
-              q: "¿Cómo integro el bot a WhatsApp?",
-              a: "El Plan Enterprise incluye integración con WhatsApp Business API. Te entregamos la URL del webhook para configurar en pocos minutos.",
-            },
-          ].map((faq) => (
-            <div key={faq.q} className="border rounded-lg p-5">
-              <h3 className="font-medium mb-2">{faq.q}</h3>
-              <p className="text-sm text-muted-foreground">{faq.a}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      <FAQSection />
 
       {/* CTA */}
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-16 border-t">
@@ -333,16 +291,28 @@ export default function PricingPage() {
             <span>YD Social Ops © 2026</span>
           </div>
           <div className="flex gap-4">
-            <Link href="/pricing" className="hover:text-foreground transition-colors font-medium text-foreground">
+            <Link
+              href="/pricing"
+              className="hover:text-foreground transition-colors font-medium text-foreground"
+            >
               Precios
             </Link>
-            <Link href="/privacy" className="hover:text-foreground transition-colors">
+            <Link
+              href="/privacy"
+              className="hover:text-foreground transition-colors"
+            >
               Privacidad
             </Link>
-            <Link href="/terms" className="hover:text-foreground transition-colors">
+            <Link
+              href="/terms"
+              className="hover:text-foreground transition-colors"
+            >
               Términos
             </Link>
-            <Link href="/privacy#cookies" className="hover:text-foreground transition-colors">
+            <Link
+              href="/privacy#cookies"
+              className="hover:text-foreground transition-colors"
+            >
               Cookies
             </Link>
           </div>

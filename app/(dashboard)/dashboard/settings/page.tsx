@@ -59,6 +59,8 @@ export default function SettingsPage() {
       mpPreapprovalId={mpPreapprovalId}
       gmailSuccess={searchParams.get("gmail_success") === "true"}
       gmailError={searchParams.get("gmail_error") || undefined}
+      calendlySuccess={searchParams.get("calendly_success") === "true"}
+      calendlyError={searchParams.get("calendly_error") || undefined}
       initialSaasPlan={subscribePlan}
       initialTab={initialTab}
       initialFlags={initialFlags}

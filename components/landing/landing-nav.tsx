@@ -12,6 +12,16 @@ export function LandingNav() {
 
   const navLinks = (
     <>
+      <Link href="/#features" onClick={() => setOpen(false)}>
+        <Button variant="ghost" size="sm" className="w-full justify-start sm:w-auto">
+          Funcionalidades
+        </Button>
+      </Link>
+      <Link href="/#channels" onClick={() => setOpen(false)}>
+        <Button variant="ghost" size="sm" className="w-full justify-start sm:w-auto">
+          Canales
+        </Button>
+      </Link>
       <Link href="/pricing" onClick={() => setOpen(false)}>
         <Button variant="ghost" size="sm" className="w-full justify-start sm:w-auto">
           Precios
@@ -72,15 +82,17 @@ export function LandingNav() {
             <SheetTitle>Menú de navegación</SheetTitle>
           </VisuallyHidden>
           <div className="flex flex-col gap-4 pt-8">
+            <Link href="/#features" onClick={() => setOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start">Funcionalidades</Button>
+            </Link>
+            <Link href="/#channels" onClick={() => setOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start">Canales</Button>
+            </Link>
             <Link href="/pricing" onClick={() => setOpen(false)}>
-              <Button variant="ghost" className="w-full justify-start">
-                Precios
-              </Button>
+              <Button variant="ghost" className="w-full justify-start">Precios</Button>
             </Link>
             <Link href="/login" onClick={() => setOpen(false)}>
-              <Button variant="ghost" className="w-full justify-start">
-                Iniciar sesión
-              </Button>
+              <Button variant="ghost" className="w-full justify-start">Iniciar sesión</Button>
             </Link>
             <Link href="/register" onClick={() => setOpen(false)}>
               <Button className="w-full">

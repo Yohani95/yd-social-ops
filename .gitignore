@@ -42,6 +42,9 @@ next-env.d.ts
 # Testing
 coverage
 .nyc_output
+output/qa/
+test-results/
+playwright-report/
 
 # Misc
 *.pem

@@ -1,0 +1,81 @@
+name: QA Regression Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  qa-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+      APP_URL: http://127.0.0.1:3000
+      E2E_BASE_URL: http://127.0.0.1:3000
+      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+      E2E_TENANT_ID: ${{ secrets.E2E_TENANT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Build app
+        run: npm run build
+
+      - name: Start app
+        run: |
+          npm run start > /tmp/next.log 2>&1 &
+          echo $! > /tmp/next.pid
+
+      - name: Wait for app
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:3000/login >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "App did not start in time"
+          cat /tmp/next.log || true
+          exit 1
+
+      - name: Run QA regression (blocking)
+        run: npm run qa:regression
+
+      - name: Upload QA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-artifacts
+          path: |
+            output/qa/**
+            test-results/**
+
+      - name: Print app logs on failure
+        if: failure()
+        run: cat /tmp/next.log || true
+
+      - name: Stop app
+        if: always()
+        run: |
+          if [ -f /tmp/next.pid ]; then
+            kill $(cat /tmp/next.pid) || true
+          fi

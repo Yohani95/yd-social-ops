@@ -41,7 +41,9 @@ export async function POST(
 
     const adapter = getAdapter(thread.channel);
     const formattedMessage = adapter.formatMessage(message);
-    await adapter.sendReply(thread.user_identifier, formattedMessage, channel);
+    await adapter.sendReply(thread.user_identifier, formattedMessage, channel, {
+      throwOnError: true,
+    });
   }
 
   const now = new Date().toISOString();

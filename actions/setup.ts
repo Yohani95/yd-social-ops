@@ -46,6 +46,7 @@ const SERVICE_HINTS = [
 ];
 
 const INFO_HINTS = ["informacion", "horario", "ubicacion", "faq", "preguntas"];
+const DELIVERY_HINTS = ["delivery", "domicilio", "despacho", "pedido", "reparto", "envio"];
 
 const STOP_WORDS = new Set([
   "de",
@@ -119,12 +120,14 @@ function inferItemType(item: string, businessType: BusinessType): ItemType {
   if (businessType === "services" || businessType === "professional") return "service";
 
   const lower = item.toLowerCase();
+  if (DELIVERY_HINTS.some((k) => lower.includes(k))) return "delivery";
   if (INFO_HINTS.some((k) => lower.includes(k))) return "info";
   if (SERVICE_HINTS.some((k) => lower.includes(k))) return "service";
   return "product";
 }
 
 function inferUnitLabel(item: string, itemType: ItemType): string {
+  if (itemType === "delivery") return "pedido";
   if (itemType !== "service") return "unidad";
 
   const lower = item.toLowerCase();
@@ -136,6 +139,7 @@ function inferUnitLabel(item: string, itemType: ItemType): string {
 }
 
 function inferAvailabilityType(item: string, itemType: ItemType): AvailabilityType {
+  if (itemType === "delivery") return "quota";
   if (itemType !== "service") return "stock";
   const lower = item.toLowerCase();
   if (lower.includes("check-in") || lower.includes("checkout") || lower.includes("noche") || lower.includes("reserva")) {
@@ -186,6 +190,9 @@ function buildProductFromText(item: string, businessType: BusinessType): Product
   const description = extractDescription(normalized, name);
   const keywords = extractKeywords(normalized, name);
 
+  const pricingMode =
+    itemType === "info" ? "free" : itemType === "service" ? "from" : "fixed";
+
   return {
     name,
     description,
@@ -198,6 +205,8 @@ function buildProductFromText(item: string, businessType: BusinessType): Product
     availability_type: availabilityType,
     min_quantity: 1,
     max_quantity: itemType === "service" && availabilityType === "calendar" ? 30 : 99,
+    pricing_mode: pricingMode,
+    attributes: {},
   };
 }
 
@@ -223,6 +232,8 @@ function sanitizeProducts(products: ProductCreate[]): ProductCreate[] {
       min_quantity: Number.isFinite(product.min_quantity ?? 1) ? Math.max(1, Math.round(product.min_quantity ?? 1)) : 1,
       max_quantity: Number.isFinite(product.max_quantity ?? 99) ? Math.max(1, Math.round(product.max_quantity ?? 99)) : 99,
       item_type: product.item_type || "product",
+      pricing_mode: product.pricing_mode || (product.item_type === "info" ? "free" : product.item_type === "service" ? "from" : "fixed"),
+      attributes: product.attributes && typeof product.attributes === "object" ? product.attributes : {},
       keywords: product.keywords?.filter(Boolean) || null,
       image_url: product.image_url || null,
     });
@@ -339,6 +350,8 @@ export async function completeSetupWizard(
         keywords: p.keywords?.filter(Boolean) || null,
         image_url: p.image_url || null,
         item_type: p.item_type || "product",
+        pricing_mode: p.pricing_mode || (p.item_type === "info" ? "free" : p.item_type === "service" ? "from" : "fixed"),
+        attributes: p.attributes && typeof p.attributes === "object" ? p.attributes : {},
       }));
 
     skippedProducts = incomingProducts.length - rowsToInsert.length;

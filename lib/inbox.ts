@@ -27,21 +27,28 @@ function normalizeText(input: string): string {
   return input.trim().slice(0, 12000);
 }
 
-async function findContactId(params: {
+interface ContactLite {
+  id: string;
+  lead_stage?: string | null;
+  lead_value?: number | null;
+  assigned_tenant_user_id?: string | null;
+}
+
+async function findContact(params: {
   tenantId: string;
   channel: ChatChannel;
   userIdentifier: string;
-}): Promise<string | null> {
+}): Promise<ContactLite | null> {
   const supabase = createServiceClient();
   const { data } = await supabase
     .from("contacts")
-    .select("id")
+    .select("id, lead_stage, lead_value, assigned_tenant_user_id")
     .eq("tenant_id", params.tenantId)
     .eq("channel", params.channel)
     .eq("identifier", params.userIdentifier)
     .maybeSingle();
 
-  return data?.id || null;
+  return (data as ContactLite | null) || null;
 }
 
 async function ensureThread(params: {
@@ -54,11 +61,12 @@ async function ensureThread(params: {
 }): Promise<ThreadRow | null> {
   const supabase = createServiceClient();
   const now = new Date().toISOString();
-  const contactId = await findContactId({
+  const contact = await findContact({
     tenantId: params.tenantId,
     channel: params.channel,
     userIdentifier: params.userIdentifier,
   });
+  const contactId = contact?.id || null;
   const unreadDelta = params.unreadDelta ?? 0;
 
   const { data: existing } = await supabase
@@ -77,6 +85,9 @@ async function ensureThread(params: {
       .from("conversation_threads")
       .update({
         contact_id: contactId || existing.contact_id || null,
+        lead_stage_snapshot: (contact?.lead_stage as ThreadRow["lead_stage_snapshot"]) || existing.lead_stage_snapshot || "new",
+        lead_value_snapshot: contact?.lead_value ?? existing.lead_value_snapshot ?? 0,
+        assigned_tenant_user_id: contact?.assigned_tenant_user_id || existing.assigned_tenant_user_id || null,
         status: params.status || existing.status,
         last_message_at: now,
         unread_count: nextUnread,
@@ -97,6 +108,9 @@ async function ensureThread(params: {
       channel: params.channel,
       user_identifier: params.userIdentifier,
       contact_id: contactId,
+      lead_stage_snapshot: (contact?.lead_stage as ThreadRow["lead_stage_snapshot"]) || "new",
+      lead_value_snapshot: contact?.lead_value ?? 0,
+      assigned_tenant_user_id: contact?.assigned_tenant_user_id || null,
       status: params.status || "open",
       last_message_at: now,
       unread_count: params.resetUnread ? 0 : Math.max(0, unreadDelta),

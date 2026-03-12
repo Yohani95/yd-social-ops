@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { setFeatureFlag } from "@/actions/feature-flags";
 import type { FeatureFlag } from "@/lib/feature-flags";
 
@@ -39,6 +39,18 @@ const FLAG_DEFINITIONS: FlagDef[] = [
     description: "Enriquece el prompt del bot con chunks de conocimiento relevantes al query del usuario.",
     planRequired: "business",
   },
+  {
+    flag: "scheduling_enabled",
+    label: "Agendamiento (Calendly)",
+    description: "Habilita las herramientas de agendamiento en el bot: consultar disponibilidad, reservar y cancelar citas.",
+    planRequired: "pro",
+  },
+  {
+    flag: "ecommerce_enabled",
+    label: "E-commerce (WooCommerce / Shopify)",
+    description: "Habilita la herramienta de consulta de pedidos en el bot cuando hay una integración e-commerce activa.",
+    planRequired: "pro",
+  },
 ];
 
 interface FeatureFlagsPanelProps {
@@ -50,6 +62,11 @@ export function FeatureFlagsPanel({ initialFlags, planTier }: FeatureFlagsPanelP
   const [flags, setFlags] = useState<Record<string, boolean>>(initialFlags);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // Sync when parent loads flags async
+  useEffect(() => {
+    setFlags(initialFlags);
+  }, [initialFlags]);
 
   const planOrder = ["basic", "pro", "business", "enterprise", "enterprise_plus"];
   const planIndex = planOrder.indexOf(planTier);

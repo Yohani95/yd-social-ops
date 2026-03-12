@@ -42,7 +42,7 @@ export async function authenticateApiRequest(req: NextRequest, requiredScope: st
         return { tenantId: null, error: "API key is revoked or inactive", status: 403 };
     }
 
-    if (!apiKey.scopes.includes(requiredScope) && !apiKey.scopes.includes("all")) {
+    if (!apiKey.scopes.includes(requiredScope) && !apiKey.scopes.includes("all") && !apiKey.scopes.includes("*")) {
         return { tenantId: null, error: `Insufficient permissions. Requires scope: ${requiredScope}`, status: 403 };
     }
 

@@ -7,6 +7,7 @@ import { notifyN8n } from "@/lib/integrations/n8n";
 import { sendPaymentConfirmationEmail } from "@/lib/email";
 import { getAdapter } from "@/lib/channel-adapters";
 import { getActiveChannelConfig, recordOutboundThreadMessage } from "@/lib/inbox";
+import { trackEvent } from "@/lib/conversion-analytics";
 import type { ChatChannel } from "@/types";
 
 interface MPPaymentData {
@@ -140,7 +141,10 @@ function validateMPSignature(params: {
   dataId: string;
 }): boolean {
   const secret = process.env.MP_WEBHOOK_SECRET;
-  if (!secret) return true;
+  if (!secret) {
+    console.warn("[Payment Webhook] MP_WEBHOOK_SECRET is not set — denying by default");
+    return false;
+  }
 
   const parsed = parseSignature(params.signatureHeader);
   if (!parsed.ts || !parsed.v1) return false;
@@ -386,6 +390,19 @@ export async function POST(request: NextRequest) {
           null,
       });
     }
+
+    await trackEvent({
+      tenantId,
+      eventType: "payment_completed",
+      productId: productId || null,
+      amount,
+      currency,
+      actorType: "system",
+      metadata: {
+        payment_id: paymentId,
+        merchant_payment_link_id: merchantPaymentLinkId || null,
+      },
+    });
 
     await notifyApprovedPaymentInConversation({
       tenantId,

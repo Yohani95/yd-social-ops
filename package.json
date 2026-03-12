@@ -7,6 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "qa:smoke": "playwright test tests/qa/smoke.spec.ts",
+    "qa:flows": "playwright test tests/qa/flows.spec.ts",
+    "qa:bot-scorecard": "node scripts/qa/bot-scorecard.mjs",
+    "qa:regression": "npm run qa:smoke && npm run qa:flows && npm run qa:bot-scorecard",
     "mp:plans:reset": "node scripts/mp-plans-reset.mjs",
     "mp:validate-env": "node scripts/mp-validate-env.mjs --env=.env.local",
     "mp:plans:backurl": "node scripts/mp-update-plan-backurls.mjs"
@@ -49,6 +53,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@types/node": "^20",
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19",
